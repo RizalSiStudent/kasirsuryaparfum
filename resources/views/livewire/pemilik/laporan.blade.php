@@ -4,6 +4,7 @@ use Livewire\Volt\Component;
 use App\Models\Penjualan;
 use App\Models\DetailPenjualan;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 
@@ -16,6 +17,7 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
     public $total_pendapatan = 0;
     public $total_transaksi = 0;
     public $rata_rata_transaksi = 0;
+    public $total_laba = 0; // <-- PERBAIKAN 1: Mendaftarkan variabel agar terbaca di HTML
     public $riwayat_penjualan = [];
 
     public function mount()
@@ -39,15 +41,23 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
 
         $query = Penjualan::whereBetween('created_at', [$mulai, $akhir]);
 
-        // PERBAIKAN: Hitung Metrik Dinamis HANYA UNTUK TRANSAKSI SUKSES/LUNAS
+        // Hitung Metrik Dinamis HANYA UNTUK TRANSAKSI SUKSES/LUNAS
         $this->total_pendapatan = (clone $query)->where('status_pembayaran', 'success')->sum('total_bayar');
         $this->total_transaksi = (clone $query)->where('status_pembayaran', 'success')->count();
         $this->rata_rata_transaksi = $this->total_transaksi > 0 ? $this->total_pendapatan / $this->total_transaksi : 0;
 
-        // Ambil Daftar Transaksi (Tabel tetap menampilkan semua agar kelihatan mana yang gagal)
+        // Ambil Daftar Transaksi
         $this->riwayat_penjualan = (clone $query)->with(['pengguna', 'pelanggan'])
                                                  ->latest()
                                                  ->get();
+                                                 
+        // PERBAIKAN 2 & 3: Cara paling aman menghitung laba lintas tabel tanpa error relasi
+        $this->total_laba = DB::table('detail_penjualans')
+            ->join('penjualans', 'detail_penjualans.id_penjualan', '=', 'penjualans.id_penjualan')
+            ->where('penjualans.status_pembayaran', 'success')
+            ->whereBetween('penjualans.created_at', [$mulai, $akhir])
+            ->selectRaw('SUM(detail_penjualans.subtotal - COALESCE(detail_penjualans.subtotal_modal, 0)) as laba')
+            ->value('laba') ?? 0;
     }
 
     public function setHariIni()
@@ -56,6 +66,7 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
         $this->tanggal_akhir = Carbon::now()->format('Y-m-d');
         $this->filterLaporan();
     }
+    
     public function exportExcel()
     {
         // 1. Siapkan Nama File
@@ -92,7 +103,7 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                     $trx->total_bayar
                 ]);
                 
-                // PERBAIKAN: Hanya tambahkan ke total pendapatan JIKA lunas
+                // Hanya tambahkan ke total pendapatan JIKA lunas
                 if ($trx->status_pembayaran === 'success') {
                     $total_pendapatan += $trx->total_bayar;
                 }
@@ -134,8 +145,8 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                     Hari Ini Saja
                 </button>
                 <button wire:click="exportExcel" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow-sm transition-all flex items-center gap-2">
-        📊 Export Excel
-    </button>
+                    📊 Export Excel
+                </button>
             </div>
         </div>
         
@@ -163,59 +174,74 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                 <p class="text-3xl font-bold">Rp {{ number_format($rata_rata_transaksi, 0, ',', '.') }}</p>
             </div>
         </div>
+        
+        <div class="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div class="flex items-center gap-4">
+                <div class="p-3 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg">
+                    <flux:icon.banknotes class="size-6 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div>
+                    <p class="text-sm font-medium text-zinc-500 dark:text-zinc-400">Total Laba Kotor</p>
+                    <h3 class="text-2xl font-bold text-zinc-900 dark:text-white">
+                        Rp {{ number_format($total_laba, 0, ',', '.') }}
+                    </h3>
+                </div>
+            </div>
+        </div>
 
         <div class="bg-white dark:bg-zinc-800 p-6 rounded-lg border dark:border-zinc-700 shadow-sm mt-2">
             <h3 class="font-bold mb-4 dark:text-gray-100 text-lg border-b pb-2">Rincian Transaksi</h3>
             <div class="overflow-x-auto h-[500px] overflow-y-auto">
                 <table class="min-w-full text-sm">
-    <thead class="sticky top-0 bg-zinc-100 dark:bg-zinc-900 shadow-sm">
-        <tr class="border-b dark:border-zinc-700 dark:text-gray-200">
-            <th class="px-4 py-3 text-left">Tanggal & Waktu</th>
-            <th class="px-4 py-3 text-left">No. Faktur</th>
-            <th class="px-4 py-3 text-left">Kasir</th>
-            <th class="px-4 py-3 text-left">Pelanggan</th>
-            <th class="px-4 py-3 text-left">Metode</th>
-            <th class="px-4 py-3 text-center">Status</th> <th class="px-4 py-3 text-right">Total Belanja</th>
-        </tr>
-    </thead>
-    <tbody class="divide-y dark:divide-zinc-700">
-        @foreach($riwayat_penjualan as $trx)
-        <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 dark:text-gray-300">
-            <td class="px-4 py-3">{{ \Carbon\Carbon::parse($trx->waktu_transaksi)->format('d/m/Y H:i') }}</td>
-            <td class="px-4 py-3 font-semibold text-blue-600 dark:text-blue-400">
-                <a href="{{ route('kasir.struk', $trx->no_faktur) }}" target="_blank" title="Cetak Ulang Struk">
-                    {{ $trx->no_faktur }}
-                </a>
-            </td>
-            <td class="px-4 py-3">{{ $trx->pengguna->name }}</td>
-            <td class="px-4 py-3">{{ $trx->pelanggan ? $trx->pelanggan->nama_pelanggan : 'Umum' }}</td>
-            <td class="px-4 py-3">
-                <span class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">{{ $trx->metode_pembayaran }}</span>
-            </td>
-            
-            <td class="px-4 py-3 text-center">
-                @if($trx->status_pembayaran === 'success')
-                    <span class="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-1 rounded text-xs font-bold border border-green-200 dark:border-green-800">Lunas</span>
-                @elseif($trx->status_pembayaran === 'pending')
-                    <span class="bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 px-2 py-1 rounded text-xs font-bold border border-yellow-200 dark:border-yellow-800">Pending</span>
-                @else
-                    <span class="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-1 rounded text-xs font-bold border border-red-200 dark:border-red-800">Gagal</span>
-                @endif
-            </td>
+                    <thead class="sticky top-0 bg-zinc-100 dark:bg-zinc-900 shadow-sm">
+                        <tr class="border-b dark:border-zinc-700 dark:text-gray-200">
+                            <th class="px-4 py-3 text-left">Tanggal & Waktu</th>
+                            <th class="px-4 py-3 text-left">No. Faktur</th>
+                            <th class="px-4 py-3 text-left">Kasir</th>
+                            <th class="px-4 py-3 text-left">Pelanggan</th>
+                            <th class="px-4 py-3 text-left">Metode</th>
+                            <th class="px-4 py-3 text-center">Status</th> 
+                            <th class="px-4 py-3 text-right">Total Belanja</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y dark:divide-zinc-700">
+                        @foreach($riwayat_penjualan as $trx)
+                        <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 dark:text-gray-300">
+                            <td class="px-4 py-3">{{ \Carbon\Carbon::parse($trx->waktu_transaksi)->format('d/m/Y H:i') }}</td>
+                            <td class="px-4 py-3 font-semibold text-blue-600 dark:text-blue-400">
+                                <a href="{{ route('kasir.struk', $trx->no_faktur) }}" target="_blank" title="Cetak Ulang Struk">
+                                    {{ $trx->no_faktur }}
+                                </a>
+                            </td>
+                            <td class="px-4 py-3">{{ $trx->pengguna->name }}</td>
+                            <td class="px-4 py-3">{{ $trx->pelanggan ? $trx->pelanggan->nama_pelanggan : 'Umum' }}</td>
+                            <td class="px-4 py-3">
+                                <span class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-xs">{{ $trx->metode_pembayaran }}</span>
+                            </td>
+                            
+                            <td class="px-4 py-3 text-center">
+                                @if($trx->status_pembayaran === 'success')
+                                    <span class="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2 py-1 rounded text-xs font-bold border border-green-200 dark:border-green-800">Lunas</span>
+                                @elseif($trx->status_pembayaran === 'pending')
+                                    <span class="bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 px-2 py-1 rounded text-xs font-bold border border-yellow-200 dark:border-yellow-800">Pending</span>
+                                @else
+                                    <span class="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-1 rounded text-xs font-bold border border-red-200 dark:border-red-800">Gagal</span>
+                                @endif
+                            </td>
 
-            <td class="px-4 py-3 text-right font-bold text-green-600 dark:text-green-400">
-                Rp {{ number_format($trx->total_bayar, 0, ',', '.') }}
-            </td>
-        </tr>
-        @endforeach
-        
-        @if(count($riwayat_penjualan) == 0)
-        <tr>
-            <td colspan="7" class="px-4 py-8 text-center text-gray-500 italic">Tidak ada transaksi pada rentang tanggal tersebut.</td>
-        </tr>
-        @endif
-    </tbody>
-</table>
+                            <td class="px-4 py-3 text-right font-bold text-green-600 dark:text-green-400">
+                                Rp {{ number_format($trx->total_bayar, 0, ',', '.') }}
+                            </td>
+                        </tr>
+                        @endforeach
+                        
+                        @if(count($riwayat_penjualan) == 0)
+                        <tr>
+                            <td colspan="7" class="px-4 py-8 text-center text-gray-500 italic">Tidak ada transaksi pada rentang tanggal tersebut.</td>
+                        </tr>
+                        @endif
+                    </tbody>
+                </table>
             </div>
         </div>
 

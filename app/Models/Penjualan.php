@@ -27,7 +27,8 @@ class Penjualan extends Model
         return $this->belongsTo(Pelanggan::class, 'id_pelanggan', 'id_pelanggan');
     }
     
-    public function detail() {
-        return $this->hasMany(DetailPenjualan::class, 'id_penjualan', 'id_penjualan');
-    }
+    public function details()
+{
+    return $this->hasMany(DetailPenjualan::class, 'id_penjualan', 'id_penjualan');
+}
 }

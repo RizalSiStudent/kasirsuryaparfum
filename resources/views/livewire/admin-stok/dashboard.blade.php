@@ -84,7 +84,7 @@ new #[Layout('layouts.app')] #[Title('Dashboard Admin Stok - Surya Parfum')] cla
                 <div>
                     <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Varian Bibit Parfum</p>
                     <h3 class="text-2xl font-black text-gray-800 dark:text-gray-100 mt-1">{{ $total_bibit }} Item</h3>
-                </div>
+                </div>~
             </div>
 
             <div class="bg-white dark:bg-zinc-800 p-6 rounded-xl border dark:border-zinc-700 shadow-sm flex items-center gap-4 border-l-4 border-l-purple-500">

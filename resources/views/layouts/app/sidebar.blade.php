@@ -4,7 +4,7 @@
         @include('partials.head')
     </head>
     <body class="min-h-screen bg-white dark:bg-zinc-800">
-        <flux:sidebar sticky collapsible="mobile" class="border-e border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
+        <flux:sidebar sticky collapsible class="border-e border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
             <flux:sidebar.header>
                 @php
                     $homeUrl = route('dashboard');
@@ -15,7 +15,7 @@
                     }
                 @endphp
                 <x-app-logo :sidebar="true" href="{{ $homeUrl }}" wire:navigate />
-                <flux:sidebar.collapse class="lg:hidden" />
+                <flux:sidebar.collapse/>
             </flux:sidebar.header>
 
             <flux:sidebar.nav>
@@ -49,24 +49,32 @@
                 @endif
 
                 @if(auth()->check() && in_array(auth()->user()->peran, ['kasir', 'pemilik']))
-                    <flux:sidebar.item icon="home" :href="route('kasir.dashboard')" :current="request()->routeIs('kasir.dashboard')" wire:navigate>
-                        {{ __('Dashboard Kasir') }}
-                    </flux:sidebar.item>
-                    
-                    <flux:sidebar.item icon="shopping-cart" :href="route('kasir.penjualan')" :current="request()->routeIs('kasir.penjualan')" wire:navigate>
-                        {{ __('Mesin Kasir (POS)') }}
-                    </flux:sidebar.item>
-                @endif
+    {{-- Menu ini sekarang hanya muncul jika perannya adalah kasir --}}
+    @if(auth()->user()->peran === 'kasir')
+        <flux:sidebar.item icon="home" :href="route('kasir.dashboard')" :current="request()->routeIs('kasir.dashboard')" wire:navigate>
+            {{ __('Dashboard Kasir') }}
+        </flux:sidebar.item>
+    @endif
+    
+    {{-- Pemilik dan Kasir tetap bisa melihat Mesin Kasir --}}
+    <flux:sidebar.item icon="shopping-cart" :href="route('kasir.penjualan')" :current="request()->routeIs('kasir.penjualan')" wire:navigate>
+        {{ __('Mesin Kasir (POS)') }}
+    </flux:sidebar.item>
+@endif
 
                 @if(auth()->check() && in_array(auth()->user()->peran, ['admin_stok', 'pemilik']))
-                    <flux:sidebar.item icon="home" :href="route('admin-stok.dashboard')" :current="request()->routeIs('admin-stok.dashboard')" wire:navigate>
-                        {{ __('Dashboard Gudang') }}
-                    </flux:sidebar.item>
+    {{-- Menu ini sekarang hanya muncul jika perannya adalah admin_stok --}}
+    @if(auth()->user()->peran === 'admin_stok')
+        <flux:sidebar.item icon="home" :href="route('admin-stok.dashboard')" :current="request()->routeIs('admin-stok.dashboard')" wire:navigate>
+            {{ __('Dashboard Gudang') }}
+        </flux:sidebar.item>
+    @endif
 
-                    <flux:sidebar.item icon="clipboard-document-list" :href="route('admin-stok.kelola')" :current="request()->routeIs('admin-stok.kelola')" wire:navigate>
-                        {{ __('Kelola Stok & Retur') }}
-                    </flux:sidebar.item>
-                @endif
+    {{-- Pemilik dan Admin Stok tetap bisa melihat Kelola Stok --}}
+    <flux:sidebar.item icon="clipboard-document-list" :href="route('admin-stok.kelola')" :current="request()->routeIs('admin-stok.kelola')" wire:navigate>
+        {{ __('Kelola Stok & Retur') }}
+    </flux:sidebar.item>
+@endif
                 </flux:sidebar.group>
             </flux:sidebar.nav>
 

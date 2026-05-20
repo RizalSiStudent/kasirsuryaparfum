@@ -39,6 +39,8 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
     public $keranjang = [];
     public $total_belanja = 0;
     public $nota_terakhir = null; // Untuk cetak struk
+    public $pending_snap_token = null; // --- TAMBAHAN: Untuk menyimpan token jika tertutup ---
+    
 
     public function mount()
     {
@@ -124,7 +126,8 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
             'id_parfum' => $parfum->id_parfum,
             'nama_parfum' => $parfum->nama_parfum,
             'ml' => $this->jumlah_ml_pilihan,
-            'subtotal' => $parfum->harga_jual_per_ml * $this->jumlah_ml_pilihan
+            'subtotal' => $parfum->harga_jual_per_ml * $this->jumlah_ml_pilihan,
+            'harga_beli_per_ml' => $parfum->harga_beli_per_ml // <-- TAMBAHAN MODAL
         ];
 
         $this->hitungTotalRacikan();
@@ -158,7 +161,8 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 'id' => null,
                 'nama' => 'Bawa Botol Sendiri (Refill)',
                 'kapasitas' => 'Sesuai Takaran',
-                'harga' => 0
+                'harga' => 0,
+                'harga_beli' => 0 // <-- TAMBAHAN MODAL
             ];
         } else {
             $botol = Botol::find($this->id_botol_pilihan);
@@ -166,7 +170,8 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 'id' => $botol->id_botol,
                 'nama' => $botol->nama_botol,
                 'kapasitas' => $botol->kapasitas_ml . ' ML',
-                'harga' => $botol->harga_jual_per_pcs
+                'harga' => $botol->harga_jual_per_pcs,
+                'harga_beli' => $botol->harga_beli_per_pcs // <-- TAMBAHAN MODAL
             ];
         }
         
@@ -210,6 +215,7 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
             'nama_produk' => $pj->nama_parfum,
             'qty' => $this->qty_parfum_jadi,
             'harga_satuan' => $pj->harga_jual_per_pcs,
+            'harga_beli_satuan' => $pj->harga_beli_per_pcs, // <-- TAMBAHAN MODAL
             'subtotal' => $pj->harga_jual_per_pcs * $this->qty_parfum_jadi
         ];
 
@@ -262,7 +268,7 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 'status_pembayaran' => $status_awal, 
             ]);
 
-            // Looping simpan detail keranjang (Sama seperti sebelumnya)
+            // Looping simpan detail keranjang
             foreach ($this->keranjang as $item) {
                 if ($item['tipe'] === 'racikan') {
                     if ($item['botol']['id'] !== null) {
@@ -272,6 +278,13 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                         $beban_harga_botol = ($idx === 0) ? $item['botol']['harga'] : 0;
                         $harga_saat_ini = $p['subtotal'] + $beban_harga_botol;
 
+                        // --- HITUNG MODAL RACIKAN ---
+                        $beban_modal_botol = ($idx === 0) ? $item['botol']['harga_beli'] : 0;
+                        $modal_parfum = $p['harga_beli_per_ml'] * $p['ml'];
+                        $subtotal_modal = $modal_parfum + $beban_modal_botol;
+                        // Gabungkan harga beli per ML dan botol (jika ada) sebagai referensi harga satuan
+                        $harga_beli_satuan_gabungan = $p['harga_beli_per_ml'] + (($idx === 0) ? $item['botol']['harga_beli'] : 0);
+
                         DetailPenjualan::create([
                             'id_penjualan' => $penjualan->id_penjualan,
                             'id_botol' => $item['botol']['id'],
@@ -279,17 +292,23 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                             'jumlah_ml' => $p['ml'],
                             'harga_saat_transaksi' => $harga_saat_ini,
                             'subtotal' => $harga_saat_ini,
+                            'harga_beli_saat_transaksi' => $harga_beli_satuan_gabungan, // <-- DATA MODAL DISIMPAN
+                            'subtotal_modal' => $subtotal_modal,                         // <-- DATA MODAL DISIMPAN
                         ]);
                         Parfum::where('id_parfum', $p['id_parfum'])->decrement('stok_ml', $p['ml']);
                     }
                 } 
                 elseif ($item['tipe'] === 'jadi') {
+                    $subtotal_modal_jadi = $item['harga_beli_satuan'] * $item['qty']; // <-- HITUNG MODAL PARFUM JADI
+
                     DetailPenjualan::create([
                         'id_penjualan' => $penjualan->id_penjualan,
                         'id_parfum_jadi' => $item['id_parfum_jadi'],
                         'jumlah_pcs' => $item['qty'],
                         'harga_saat_transaksi' => $item['harga_satuan'],
                         'subtotal' => $item['subtotal'],
+                        'harga_beli_saat_transaksi' => $item['harga_beli_satuan'], // <-- DATA MODAL DISIMPAN
+                        'subtotal_modal' => $subtotal_modal_jadi,                  // <-- DATA MODAL DISIMPAN
                     ]);
                     ParfumJadi::where('id_parfum_jadi', $item['id_parfum_jadi'])->decrement('stok_pcs', $item['qty']);
                 }
@@ -335,6 +354,9 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 $this->keranjang = [];
                 $this->id_pelanggan = '';
                 $this->total_belanja = 0;
+                
+                // Simpan token ke variabel state
+                $this->pending_snap_token = $snapToken;
 
                 // Buka popup Midtrans
                 $this->dispatch('pay-with-midtrans', token: $snapToken);
@@ -372,6 +394,18 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
         @if (session()->has('error'))
             <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
                 {{ session('error') }}
+            </div>
+        @endif
+        
+        @if ($pending_snap_token)
+            <div class="bg-yellow-100 border border-yellow-400 text-yellow-800 px-5 py-4 rounded-lg flex flex-col md:flex-row justify-between items-center shadow-sm">
+                <div class="mb-2 md:mb-0">
+                    <strong class="block text-lg">⚠️ Menunggu Pembayaran Diselesaikan!</strong>
+                    <span class="text-sm">Faktur <b>{{ $nota_terakhir }}</b> belum dibayar atau popup tertutup.</span>
+                </div>
+                <button wire:click="$dispatch('pay-with-midtrans', { token: '{{ $pending_snap_token }}' })" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded shadow transition-all">
+                    Buka Ulang Payment Gateway
+                </button>
             </div>
         @endif
 
@@ -574,9 +608,9 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                     <p class="text-4xl font-black text-green-600 dark:text-green-500">Rp {{ number_format($total_belanja, 0, ',', '.') }}</p>
                 </div>
 
-                <button wire:click="simpanTransaksi" onclick="return confirm('Apakah pesanan dan total harga sudah sesuai?')" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-sm transition-all text-lg">
-                    Proses Pembayaran
-                </button>
+                <button wire:click="simpanTransaksi" wire:confirm="Apakah pesanan dan total harga sudah sesuai?" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-sm transition-all text-lg">
+    Proses Pembayaran
+</button>
             </div>
 
         </div>
@@ -586,9 +620,20 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
 <script>
     window.addEventListener('pay-with-midtrans', event => {
         window.snap.pay(event.detail.token, {
-            onSuccess: function(result) { location.reload(); },
-            onPending: function(result) { location.reload(); },
-            onError: function(result) { alert("Pembayaran gagal!"); }
+            onSuccess: function(result) { 
+                alert("Pembayaran berhasil!");
+                location.reload(); 
+            },
+            onPending: function(result) { 
+                location.reload(); 
+            },
+            onError: function(result) { 
+                alert("Pembayaran gagal atau dibatalkan!"); 
+            },
+            onClose: function() {
+                // Beri tahu kasir jika popup ditutup sengaja/tidak sengaja
+                alert("Anda menutup halaman pembayaran. Silakan klik tombol 'Buka Ulang Payment Gateway' jika ingin melanjutkan.");
+            }
         });
     });
 </script>

@@ -50,10 +50,10 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
                         ->get()
                         ->keyBy('tanggal');
 
-        // Looping 7 hari ke belakang (agar tanggal yang kosong tetap tampil di grafik dengan nilai 0)
+        // Looping 7 hari ke belakang
         for ($i = 0; $i < 7; $i++) {
             $tgl_asli = Carbon::now()->subDays(6 - $i)->format('Y-m-d');
-            $tgl_label = Carbon::parse($tgl_asli)->format('d M'); // Format: 01 Apr
+            $tgl_label = Carbon::parse($tgl_asli)->format('d M');
             
             $this->chart_labels[] = $tgl_label;
             $this->chart_data[] = isset($dataPenjualan[$tgl_asli]) ? $dataPenjualan[$tgl_asli]->total : 0;
@@ -70,7 +70,7 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            
+            <!-- Pendapatan -->
             <div class="bg-white dark:bg-zinc-800 p-6 rounded-xl border dark:border-zinc-700 shadow-sm flex items-center justify-between">
                 <div>
                     <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Pendapatan Bulan Ini</p>
@@ -81,6 +81,7 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
                 </div>
             </div>
 
+            <!-- Transaksi -->
             <div class="bg-white dark:bg-zinc-800 p-6 rounded-xl border dark:border-zinc-700 shadow-sm flex items-center justify-between">
                 <div>
                     <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Transaksi Lunas (Bulan Ini)</p>
@@ -91,6 +92,7 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
                 </div>
             </div>
 
+            <!-- Produk -->
             <div class="bg-white dark:bg-zinc-800 p-6 rounded-xl border dark:border-zinc-700 shadow-sm flex items-center justify-between">
                 <div>
                     <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Total Varian Parfum</p>
@@ -100,7 +102,6 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
                 </div>
             </div>
-
         </div>
 
         <div class="bg-white dark:bg-zinc-800 p-6 rounded-xl border dark:border-zinc-700 shadow-sm mt-2" wire:ignore>
@@ -114,70 +115,80 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
         </div>
 
     </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Pindahkan script ke bagian paling bawah dari komponen -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Fungsi utama untuk menggambar grafik
+        function renderGrafik() {
+            const canvas = document.getElementById('grafikPenjualan');
+            
+            // Pastikan canvas ada di halaman sebelum mencoba menggambar
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            
+            // Tangkap data PHP yang dilempar Livewire
+            const labels = @json($chart_labels);
+            const dataPenjualan = @json($chart_data);
 
-<script>
-    document.addEventListener('livewire:initialized', () => {
-        // Ambil data yang dilempar dari PHP di atas
-        const labels = @json($chart_labels);
-        const dataPenjualan = @json($chart_data);
-
-        const ctx = document.getElementById('grafikPenjualan').getContext('2d');
-        
-        new Chart(ctx, {
-            type: 'line', // Bisa diganti 'bar' kalau mau bentuk batang
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Pendapatan (Rp)',
-                    data: dataPenjualan,
-                    borderColor: '#10B981', // Emerald 500 (Hijau)
-                    backgroundColor: 'rgba(16, 185, 129, 0.15)', // Hijau transparan untuk area bawah garis
-                    borderWidth: 3,
-                    fill: true,
-                    tension: 0.4, // Membuat garisnya melengkung halus (curved)
-                    pointBackgroundColor: '#fff',
-                    pointBorderColor: '#10B981',
-                    pointRadius: 4,
-                    pointHoverRadius: 6
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false // Sembunyikan legenda atas karena hanya 1 garis
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return ' Rp ' + context.parsed.y.toLocaleString('id-ID');
-                            }
-                        }
-                    }
+            // Jika sebelumnya sudah ada grafik yang tergambar, hancurkan dulu (mencegah error menumpuk)
+            if (window.mySuryaChart) {
+                window.mySuryaChart.destroy();
+            }
+            
+            // Buat grafik baru
+            window.mySuryaChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Pendapatan (Rp)',
+                        data: dataPenjualan,
+                        borderColor: '#10B981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                        borderWidth: 3,
+                        fill: true,
+                        tension: 0.4,
+                        pointBackgroundColor: '#fff',
+                        pointBorderColor: '#10B981',
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
                 },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: {
-                            color: 'rgba(156, 163, 175, 0.1)' // Garis panduan tipis
-                        },
-                        ticks: {
-                            callback: function(value) {
-                                return 'Rp ' + value.toLocaleString('id-ID');
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return ' Rp ' + context.parsed.y.toLocaleString('id-ID');
+                                }
                             }
                         }
                     },
-                    x: {
-                        grid: {
-                            display: false
-                        }
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(156, 163, 175, 0.1)' },
+                            ticks: {
+                                callback: function(value) {
+                                    return 'Rp ' + value.toLocaleString('id-ID');
+                                }
+                            }
+                        },
+                        x: { grid: { display: false } }
                     }
                 }
-            }
-        });
-    });
-</script>
+            });
+        }
+
+        // EVENT 1: Dipicu saat halaman pertama kali diakses lewat F5 atau ketik URL
+        document.addEventListener('DOMContentLoaded', renderGrafik);
+        
+        // EVENT 2: Dipicu khusus oleh Livewire v3 ketika pindah antar menu (SPA mode)
+        document.addEventListener('livewire:navigated', renderGrafik);
+    </script>
+</div>

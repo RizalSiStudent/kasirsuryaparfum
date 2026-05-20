@@ -17,6 +17,8 @@ class DetailPenjualan extends Model
         'jumlah_pcs',     // <-- Tambahan
         'harga_saat_transaksi',
         'subtotal',
+        'harga_beli_saat_transaksi', // <-- Wajib masuk ke sini
+    'subtotal_modal'             // <-- Wajib masuk ke sini
     ];
     public function parfum() {
     return $this->belongsTo(Parfum::class, 'id_parfum', 'id_parfum');
