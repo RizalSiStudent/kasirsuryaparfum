@@ -7,6 +7,8 @@ use App\Models\ParfumJadi;
 use App\Models\Pelanggan;
 use App\Models\Penjualan;
 use App\Models\DetailPenjualan;
+use App\Models\Diskon; 
+use Carbon\Carbon; 
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -19,7 +21,6 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
     // Form Pembayaran
     public $id_pelanggan = '';
     public $metode_pembayaran = 'Tunai';
-    // --- TAMBAHAN BARU: Variabel Uang Tunai ---
     public $uang_dibayar = '';
     public $kembalian = 0;
     
@@ -37,14 +38,19 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
 
     // Keranjang Belanja Utama
     public $keranjang = [];
-    public $total_belanja = 0;
-    public $nota_terakhir = null; // Untuk cetak struk
-    public $pending_snap_token = null; // --- TAMBAHAN: Untuk menyimpan token jika tertutup ---
+    public $subtotal_belanja = 0; 
+    public $potongan_diskon = 0;  
+    public $total_belanja = 0;    
     
-
+    public $diskon_aktif = null;  
+    public $ada_promo_member = false; // <-- State baru untuk deteksi UI peringatan promo
+    public $nota_terakhir = null; 
+    public $pending_snap_token = null; 
+    
     public function mount()
     {
         $this->loadDataMaster();
+        $this->hitungTotalBelanja(); // Hitung keranjang dan promo saat awal halaman dibuka
     }
 
     public function loadDataMaster()
@@ -55,17 +61,14 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
         $this->pelanggans = Pelanggan::all();
     }
 
-    // Fungsi otomatis berjalan saat metode pembayaran diganti
     public function updatedMetodePembayaran($value)
     {
-        // Kosongkan input uang jika pilih non-tunai
         if ($value !== 'Tunai') {
             $this->uang_dibayar = '';
             $this->kembalian = 0;
         }
     }
 
-    // Fungsi otomatis berjalan saat kasir mengetik nominal uang
     public function updatedUangDibayar($value)
     {
         $this->hitungKembalian();
@@ -81,11 +84,17 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
         }
     }
 
-    // --- LOGIKA PARFUM RACIKAN (UPDATE: REFILL) ---
-    public function updatedIdBotolPilihan($value)
+    public function updatedIdPelanggan($value)
     {
+        // Fungsi ini memicu perhitungan ulang saat pelanggan dipilih/dihapus
+        $this->hitungTotalBelanja(); 
+    }
+
+    // --- LOGIKA PARFUM RACIKAN ---
+    public function pilihBotol($value)
+    {
+        $this->id_botol_pilihan = $value; 
         if ($value === 'bawa_sendiri') {
-            // Jika bawa botol sendiri, set kapasitas sangat besar agar bebas isi berapa saja
             $this->kapasitas_botol_pilihan = 9999; 
         } elseif ($value) {
             $botol = Botol::find($value);
@@ -116,7 +125,6 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
             return;
         }
 
-        // Cek kapasitas meluber HANYA JIKA beli botol dari toko
         if ($this->id_botol_pilihan !== 'bawa_sendiri' && ($this->total_ml_racikan + $this->jumlah_ml_pilihan) > $this->kapasitas_botol_pilihan) {
             session()->flash('error_racikan', 'Takaran melebihi kapasitas botol!');
             return;
@@ -127,7 +135,7 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
             'nama_parfum' => $parfum->nama_parfum,
             'ml' => $this->jumlah_ml_pilihan,
             'subtotal' => $parfum->harga_jual_per_ml * $this->jumlah_ml_pilihan,
-            'harga_beli_per_ml' => $parfum->harga_beli_per_ml // <-- TAMBAHAN MODAL
+            'harga_beli_per_ml' => $parfum->harga_beli_per_ml
         ];
 
         $this->hitungTotalRacikan();
@@ -155,14 +163,13 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
             return;
         }
 
-        // Tentukan data botol (Bawa sendiri vs Beli botol toko)
         if ($this->id_botol_pilihan === 'bawa_sendiri') {
             $botol_data = [
                 'id' => null,
                 'nama' => 'Bawa Botol Sendiri (Refill)',
                 'kapasitas' => 'Sesuai Takaran',
                 'harga' => 0,
-                'harga_beli' => 0 // <-- TAMBAHAN MODAL
+                'harga_beli' => 0
             ];
         } else {
             $botol = Botol::find($this->id_botol_pilihan);
@@ -171,7 +178,7 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 'nama' => $botol->nama_botol,
                 'kapasitas' => $botol->kapasitas_ml . ' ML',
                 'harga' => $botol->harga_jual_per_pcs,
-                'harga_beli' => $botol->harga_beli_per_pcs // <-- TAMBAHAN MODAL
+                'harga_beli' => $botol->harga_beli_per_pcs 
             ];
         }
         
@@ -215,7 +222,7 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
             'nama_produk' => $pj->nama_parfum,
             'qty' => $this->qty_parfum_jadi,
             'harga_satuan' => $pj->harga_jual_per_pcs,
-            'harga_beli_satuan' => $pj->harga_beli_per_pcs, // <-- TAMBAHAN MODAL
+            'harga_beli_satuan' => $pj->harga_beli_per_pcs, 
             'subtotal' => $pj->harga_jual_per_pcs * $this->qty_parfum_jadi
         ];
 
@@ -232,10 +239,50 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
         $this->hitungTotalBelanja();
     }
 
+    // --- LOGIKA PERHITUNGAN TOTAL & DISKON (DIPERBARUI) ---
     public function hitungTotalBelanja()
     {
-        $this->total_belanja = array_sum(array_column($this->keranjang, 'subtotal'));
-        $this->hitungKembalian(); // <-- Tambahkan baris ini
+        $this->subtotal_belanja = array_sum(array_column($this->keranjang, 'subtotal'));
+        $this->potongan_diskon = 0;
+
+        $hariIni = Carbon::now()->format('Y-m-d');
+        
+        // 1. Ambil semua diskon yang valid hari ini
+        $semua_diskon = Diskon::where('is_active', true)
+            ->where('tanggal_mulai', '<=', $hariIni)
+            ->where('tanggal_akhir', '>=', $hariIni)
+            ->get();
+
+        // 2. Cek apakah ada satupun promo member yang aktif hari ini
+        $this->ada_promo_member = $semua_diskon->filter(fn($d) => $d->khusus_pelanggan)->isNotEmpty();
+
+        // 3. Logika Prioritas Promo
+        if (!empty($this->id_pelanggan)) {
+            // Jika kasir memilih nama pelanggan: Cari promo member dulu, kalau nggak ada, baru pakai promo umum
+            $this->diskon_aktif = $semua_diskon->filter(fn($d) => $d->khusus_pelanggan)->first() 
+                               ?? $semua_diskon->filter(fn($d) => !$d->khusus_pelanggan)->first();
+        } else {
+            // Jika pelanggan umum (tidak dipilih): Hanya boleh pakai promo umum
+            $this->diskon_aktif = $semua_diskon->filter(fn($d) => !$d->khusus_pelanggan)->first();
+        }
+
+        // 4. Hitung potongannya jika syarat terpenuhi
+        if ($this->diskon_aktif && $this->subtotal_belanja >= $this->diskon_aktif->minimal_belanja) {
+            if ($this->diskon_aktif->jenis_diskon === 'persentase') {
+                $this->potongan_diskon = ($this->subtotal_belanja * $this->diskon_aktif->nilai_diskon) / 100;
+            } else {
+                $this->potongan_diskon = $this->diskon_aktif->nilai_diskon;
+            }
+        }
+
+        $this->total_belanja = $this->subtotal_belanja - $this->potongan_diskon;
+
+        if ($this->total_belanja < 0) {
+            $this->total_belanja = 0;
+            $this->potongan_diskon = $this->subtotal_belanja;
+        }
+
+        $this->hitungKembalian(); 
     }
 
     public function simpanTransaksi()
@@ -244,7 +291,7 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
             session()->flash('error', 'Keranjang masih kosong!');
             return;
         }
-        // --- TAMBAHAN BARU: Cegah jika uang tunai kurang ---
+        
         if ($this->metode_pembayaran === 'Tunai') {
             if ($this->uang_dibayar === '' || (int) $this->uang_dibayar < $this->total_belanja) {
                 session()->flash('error', 'Transaksi gagal: Nominal uang tunai yang diberikan kurang!');
@@ -255,20 +302,21 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
         DB::beginTransaction();
 
         try {
-            // 1. Cek Metode Pembayaran untuk Status Awal
             $status_awal = ($this->metode_pembayaran === 'Tunai') ? 'success' : 'pending';
 
-            // Simpan ke tabel penjualan
             $penjualan = Penjualan::create([
                 'no_faktur' => 'INV-' . date('YmdHis'),
                 'id_pengguna' => auth()->user()->id,
                 'id_pelanggan' => $this->id_pelanggan ?: null,
-                'total_bayar' => $this->total_belanja,
+                'subtotal' => $this->subtotal_belanja,
+                'potongan_diskon' => $this->potongan_diskon,
+                'uang_dibayar' => $this->metode_pembayaran === 'Tunai' ? (int) $this->uang_dibayar : null,
+                'kembalian' => $this->metode_pembayaran === 'Tunai' ? $this->kembalian : null,
+                'total_bayar' => $this->total_belanja, 
                 'metode_pembayaran' => $this->metode_pembayaran,
                 'status_pembayaran' => $status_awal, 
             ]);
 
-            // Looping simpan detail keranjang
             foreach ($this->keranjang as $item) {
                 if ($item['tipe'] === 'racikan') {
                     if ($item['botol']['id'] !== null) {
@@ -278,11 +326,9 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                         $beban_harga_botol = ($idx === 0) ? $item['botol']['harga'] : 0;
                         $harga_saat_ini = $p['subtotal'] + $beban_harga_botol;
 
-                        // --- HITUNG MODAL RACIKAN ---
                         $beban_modal_botol = ($idx === 0) ? $item['botol']['harga_beli'] : 0;
                         $modal_parfum = $p['harga_beli_per_ml'] * $p['ml'];
                         $subtotal_modal = $modal_parfum + $beban_modal_botol;
-                        // Gabungkan harga beli per ML dan botol (jika ada) sebagai referensi harga satuan
                         $harga_beli_satuan_gabungan = $p['harga_beli_per_ml'] + (($idx === 0) ? $item['botol']['harga_beli'] : 0);
 
                         DetailPenjualan::create([
@@ -292,14 +338,14 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                             'jumlah_ml' => $p['ml'],
                             'harga_saat_transaksi' => $harga_saat_ini,
                             'subtotal' => $harga_saat_ini,
-                            'harga_beli_saat_transaksi' => $harga_beli_satuan_gabungan, // <-- DATA MODAL DISIMPAN
-                            'subtotal_modal' => $subtotal_modal,                         // <-- DATA MODAL DISIMPAN
+                            'harga_beli_saat_transaksi' => $harga_beli_satuan_gabungan, 
+                            'subtotal_modal' => $subtotal_modal,                         
                         ]);
                         Parfum::where('id_parfum', $p['id_parfum'])->decrement('stok_ml', $p['ml']);
                     }
                 } 
                 elseif ($item['tipe'] === 'jadi') {
-                    $subtotal_modal_jadi = $item['harga_beli_satuan'] * $item['qty']; // <-- HITUNG MODAL PARFUM JADI
+                    $subtotal_modal_jadi = $item['harga_beli_satuan'] * $item['qty']; 
 
                     DetailPenjualan::create([
                         'id_penjualan' => $penjualan->id_penjualan,
@@ -307,21 +353,21 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                         'jumlah_pcs' => $item['qty'],
                         'harga_saat_transaksi' => $item['harga_satuan'],
                         'subtotal' => $item['subtotal'],
-                        'harga_beli_saat_transaksi' => $item['harga_beli_satuan'], // <-- DATA MODAL DISIMPAN
-                        'subtotal_modal' => $subtotal_modal_jadi,                  // <-- DATA MODAL DISIMPAN
+                        'harga_beli_saat_transaksi' => $item['harga_beli_satuan'], 
+                        'subtotal_modal' => $subtotal_modal_jadi,                  
                     ]);
                     ParfumJadi::where('id_parfum_jadi', $item['id_parfum_jadi'])->decrement('stok_pcs', $item['qty']);
                 }
             }
 
-            // 2. LOGIKA PERCABANGAN (TUNAI vs MIDTRANS)
             if ($this->metode_pembayaran === 'Tunai') {
                 DB::commit();
                 
-                // Jika Tunai, langsung sukses, kosongkan keranjang
                 $this->nota_terakhir = $penjualan->no_faktur;
                 $this->keranjang = [];
                 $this->id_pelanggan = '';
+                $this->subtotal_belanja = 0;
+                $this->potongan_diskon = 0;
                 $this->total_belanja = 0;
                 $this->uang_dibayar = '';
                 $this->kembalian = 0;
@@ -329,7 +375,6 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 session()->flash('success', 'Pembayaran Tunai Berhasil!');
                 
             } else {
-                // Jika Non-Tunai, Panggil Midtrans
                 Config::$serverKey = config('services.midtrans.serverKey');
                 Config::$isProduction = config('services.midtrans.isProduction');
                 Config::$isSanitized = true;
@@ -353,12 +398,11 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 $this->nota_terakhir = $penjualan->no_faktur;
                 $this->keranjang = [];
                 $this->id_pelanggan = '';
+                $this->subtotal_belanja = 0;
+                $this->potongan_diskon = 0;
                 $this->total_belanja = 0;
                 
-                // Simpan token ke variabel state
                 $this->pending_snap_token = $snapToken;
-
-                // Buka popup Midtrans
                 $this->dispatch('pay-with-midtrans', token: $snapToken);
             }
 
@@ -369,7 +413,7 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
     }
 }; ?>
 
-<div>
+<div x-data="{ openJadiModal: false, openBotolModal: false, openBibitModal: false }">
     <div class="flex h-full w-full flex-1 flex-col gap-6 rounded-xl p-6">
         
         <div class="flex justify-between items-center mb-2">
@@ -414,31 +458,42 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
             <div class="xl:col-span-2 space-y-6">
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-white dark:bg-zinc-800 p-6 rounded-lg border dark:border-zinc-700 shadow-sm">
-                        <h3 class="font-bold mb-4 dark:text-gray-100 text-lg flex items-center gap-2">
-                            <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
-                            Parfum Jadi (Ready)
-                        </h3>
-                        
-                        @if (session()->has('error_jadi'))
-                            <div class="text-red-600 text-sm mb-3 bg-red-50 p-2 rounded border border-red-200">
-                                {{ session('error_jadi') }}
-                            </div>
-                        @endif
+                    <div class="bg-white dark:bg-zinc-800 p-6 rounded-lg border dark:border-zinc-700 shadow-sm flex flex-col justify-between">
+                        <div>
+                            <h3 class="font-bold mb-4 dark:text-gray-100 text-lg flex items-center gap-2">
+                                <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>
+                                Parfum Jadi (Ready)
+                            </h3>
+                            
+                            @if (session()->has('error_jadi'))
+                                <div class="text-red-600 text-sm mb-3 bg-red-50 p-2 rounded border border-red-200">
+                                    {{ session('error_jadi') }}
+                                </div>
+                            @endif
 
-                        <div class="mb-4">
-                            <label class="block text-sm font-medium mb-1 dark:text-gray-200">Pilih Produk</label>
-                            <select wire:model="id_parfum_jadi_pilihan" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2 bg-purple-50 dark:bg-purple-900/20">
-                                <option value="">-- Pilih Parfum --</option>
-                                @foreach($parfum_jadis as $pj)
-                                    <option value="{{ $pj->id_parfum_jadi }}">{{ $pj->nama_parfum }} (Rp {{ number_format($pj->harga_jual_per_pcs, 0, ',', '.') }})</option>
-                                @endforeach
-                            </select>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-1 dark:text-gray-200">Produk Terpilih</label>
+                                <div class="flex gap-2">
+                                    <div class="flex-1 border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2 bg-zinc-50 dark:bg-zinc-900/40 flex items-center justify-between min-h-[42px]">
+                                        @if($id_parfum_jadi_pilihan)
+                                            @php $selectedPJ = $parfum_jadis->firstWhere('id_parfum_jadi', $id_parfum_jadi_pilihan); @endphp
+                                            <span class="font-semibold text-sm dark:text-white">{{ $selectedPJ?->nama_parfum }}</span>
+                                            <span class="text-xs font-bold text-purple-600 bg-purple-100 dark:bg-purple-950/40 dark:text-purple-400 px-2 py-0.5 rounded">Rp {{ number_format($selectedPJ?->harga_jual_per_pcs ?? 0, 0, ',', '.') }}</span>
+                                        @else
+                                            <span class="text-gray-400 italic text-sm">Belum ada produk dipilih</span>
+                                        @endif
+                                    </div>
+                                    <button @click="openJadiModal = true" type="button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 rounded-lg shadow-sm text-sm transition">
+                                        🔍 Cari
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <div class="flex gap-3 items-end">
+
+                        <div class="flex gap-3 items-end mt-2">
                             <div class="w-24">
                                 <label class="block text-sm font-medium mb-1 dark:text-gray-200">Qty (Pcs)</label>
-                                <input type="number" wire:model="qty_parfum_jadi" min="1" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2 text-center">
+                                <input type="number" wire:model="qty_parfum_jadi" min="1" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2 text-center focus:ring-orange-500 focus:border-orange-500">
                             </div>
                             <button wire:click="tambahParfumJadiKeKeranjang" class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-lg transition-all shadow-sm">
                                 + Masukkan Keranjang
@@ -458,26 +513,49 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                             </div>
                         @endif
 
-                        <div class="mb-3">
-                            <select wire:model.live="id_botol_pilihan" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2 bg-blue-50 dark:bg-blue-900/20">
-                                <option value="">-- 1. Siapkan Botol --</option>
-                                <option value="bawa_sendiri" class="font-bold text-blue-600">🧴 Bawa Botol Sendiri (Refill)</option>
-                                @foreach($botols as $b)
-                                    <option value="{{ $b->id_botol }}">{{ $b->nama_botol }} ({{ $b->kapasitas_ml }} ML)</option>
-                                @endforeach
-                            </select>
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium mb-1 dark:text-gray-200">1. Wadah Botol</label>
+                            <div class="flex gap-2">
+                                <div class="flex-1 border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2 bg-zinc-50 dark:bg-zinc-900/40 flex items-center justify-between min-h-[42px]">
+                                    @if($id_botol_pilihan === 'bawa_sendiri')
+                                        <span class="font-semibold text-sm text-blue-600 dark:text-blue-400">🧴 Bawa Botol Sendiri (Refill)</span>
+                                    @elseif($id_botol_pilihan)
+                                        @php $selectedB = $botols->firstWhere('id_botol', $id_botol_pilihan); @endphp
+                                        <span class="font-semibold text-sm dark:text-white">{{ $selectedB?->nama_botol }}</span>
+                                        <span class="text-xs font-bold text-blue-600 bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400 px-2 py-0.5 rounded">{{ $selectedB?->kapasitas_ml }} ML</span>
+                                    @else
+                                        <span class="text-gray-400 italic text-sm">Belum ada wadah dipilih</span>
+                                    @endif
+                                </div>
+                                <button @click="openBotolModal = true" type="button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 rounded-lg shadow-sm text-sm transition">
+                                    🧴 Pilih
+                                </button>
+                            </div>
                         </div>
 
                         @if($id_botol_pilihan)
-                            <div class="flex gap-2 mb-3">
-                                <select wire:model="id_parfum_pilihan" class="flex-1 border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-2 py-1 text-sm">
-                                    <option value="">-- 2. Pilih Bibit --</option>
-                                    @foreach($parfums as $p)
-                                        <option value="{{ $p->id_parfum }}">{{ $p->nama_parfum }}</option>
-                                    @endforeach
-                                </select>
-                                <input type="number" wire:model="jumlah_ml_pilihan" placeholder="ML" class="w-16 border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-2 py-1 text-sm text-center">
-                                <button wire:click="tambahParfumKeRacikan" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1 rounded-lg shadow-sm text-sm">Mix</button>
+                            <div class="flex gap-2 mb-4 items-end">
+                                <div class="flex-1">
+                                    <label class="block text-sm font-medium mb-1 dark:text-gray-200">2. Komposisi Bibit</label>
+                                    <div class="flex gap-2">
+                                        <div class="flex-1 border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2 bg-zinc-50 dark:bg-zinc-900/40 flex items-center justify-between min-h-[42px]">
+                                            @if($id_parfum_pilihan)
+                                                @php $selectedP = $parfums->firstWhere('id_parfum', $id_parfum_pilihan); @endphp
+                                                <span class="font-semibold text-xs dark:text-white truncate max-w-[120px]">{{ $selectedP?->nama_parfum }}</span>
+                                            @else
+                                                <span class="text-gray-400 italic text-sm">Pilih aromatik...</span>
+                                            @endif
+                                        </div>
+                                        <button @click="openBibitModal = true" type="button" class="bg-zinc-700 hover:bg-zinc-600 dark:bg-zinc-900 dark:hover:bg-zinc-950 text-white font-semibold px-2.5 rounded-lg text-xs shadow-sm transition">
+                                            💧 Cari
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="w-16">
+                                    <label class="block text-sm font-medium mb-1 dark:text-gray-200">Takaran</label>
+                                    <input type="number" wire:model="jumlah_ml_pilihan" placeholder="ML" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-2 py-2 text-sm text-center focus:ring-orange-500 focus:border-orange-500">
+                                </div>
+                                <button wire:click="tambahParfumKeRacikan" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-2 rounded-lg shadow-sm text-sm h-[42px]">Mix</button>
                             </div>
 
                             @if(count($racikan_sementara) > 0)
@@ -563,12 +641,18 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 
                 <div class="mb-4">
                     <label class="block text-sm font-medium mb-1 dark:text-gray-200">Pelanggan (Opsional)</label>
-                    <select wire:model="id_pelanggan" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2">
+                    <select wire:model.live="id_pelanggan" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500">
                         <option value="">-- Pelanggan Umum --</option>
                         @foreach($pelanggans as $plg)
                             <option value="{{ $plg->id_pelanggan }}">{{ $plg->nama_pelanggan }}</option>
                         @endforeach
                     </select>
+                    
+                    @if($ada_promo_member && empty($id_pelanggan))
+                        <span class="text-xs text-red-500 font-semibold mt-1 block flex items-center gap-1">
+                            ⚠️ Ada Promo Khusus Member! Pilih nama pelanggan untuk mengaktifkannya.
+                        </span>
+                    @endif
                 </div>
 
                 <div class="mb-4">
@@ -584,7 +668,7 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 <div class="bg-zinc-50 dark:bg-zinc-900 border dark:border-zinc-700 p-5 rounded-lg mb-6 shadow-inner">
                     <label class="block text-sm font-medium mb-2 dark:text-gray-200">Uang Diterima dari Pelanggan (Rp)</label>
                     <input type="number" wire:model.live.debounce.300ms="uang_dibayar" 
-                           class="w-full border dark:border-zinc-600 dark:bg-zinc-800 dark:text-white rounded-lg px-4 py-3 text-2xl font-bold text-right" 
+                           class="w-full border dark:border-zinc-600 dark:bg-zinc-800 dark:text-white rounded-lg px-4 py-3 text-2xl font-bold text-right focus:ring-orange-500 focus:border-orange-500" 
                            placeholder="0">
                     
                     <div class="mt-5 flex justify-between items-center text-lg border-t dark:border-zinc-700 pt-4">
@@ -603,19 +687,118 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 </div>
                 @endif
 
-                <div class="bg-zinc-100 dark:bg-zinc-900 p-5 rounded-lg mb-6 text-center border dark:border-zinc-700">
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Tagihan</p>
-                    <p class="text-4xl font-black text-green-600 dark:text-green-500">Rp {{ number_format($total_belanja, 0, ',', '.') }}</p>
+                <div class="bg-zinc-100 dark:bg-zinc-900 p-5 rounded-lg mb-6 border dark:border-zinc-700">
+                    <div class="flex justify-between items-center mb-2 text-gray-500 dark:text-gray-400">
+                        <span class="text-sm">Subtotal Belanja</span>
+                        <span class="font-medium">Rp {{ number_format($subtotal_belanja, 0, ',', '.') }}</span>
+                    </div>
+                    
+                    @if($diskon_aktif)
+                        <div class="flex justify-between items-start mb-2 text-orange-500 dark:text-orange-400">
+                            <span class="text-sm font-semibold">
+                                Promo: {{ $diskon_aktif->nama_event }} 
+                                @if($diskon_aktif->jenis_diskon === 'persentase') ({{ $diskon_aktif->nilai_diskon }}%) @endif
+                                
+                                @if($subtotal_belanja > 0 && $subtotal_belanja < $diskon_aktif->minimal_belanja)
+                                    <br><small class="text-red-500 font-normal">*(Belum aktif, min. belanja Rp {{ number_format($diskon_aktif->minimal_belanja, 0, ',', '.') }})</small>
+                                @endif
+                            </span>
+                            <span class="font-bold whitespace-nowrap">- Rp {{ number_format($potongan_diskon, 0, ',', '.') }}</span>
+                        </div>
+                    @endif
+
+                    <div class="border-t border-zinc-200 dark:border-zinc-700 my-3"></div>
+
+                    <div class="text-center">
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Tagihan Akhir</p>
+                        <p class="text-4xl font-black text-green-600 dark:text-green-500">Rp {{ number_format($total_belanja, 0, ',', '.') }}</p>
+                    </div>
                 </div>
 
                 <button wire:click="simpanTransaksi" wire:confirm="Apakah pesanan dan total harga sudah sesuai?" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-sm transition-all text-lg">
-    Proses Pembayaran
-</button>
+                    Proses Pembayaran
+                </button>
             </div>
 
         </div>
     </div>
+
+    <div x-show="openJadiModal" style="display: none;" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm" @click="openJadiModal = false"></div>
+        <div class="relative bg-white dark:bg-zinc-900 border dark:border-zinc-800 rounded-xl max-w-lg w-full shadow-2xl p-5 z-10 flex flex-col gap-4 max-h-[80vh]">
+            <div class="flex justify-between items-center border-b dark:border-zinc-800 pb-2">
+                <h3 class="text-lg font-bold dark:text-white">Pilih Produk Parfum Jadi</h3>
+                <button @click="openJadiModal = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">✕</button>
+            </div>
+            <div class="overflow-y-auto pr-1 flex flex-col gap-2">
+                @foreach($parfum_jadis as $pj)
+                    <div wire:click="$set('id_parfum_jadi_pilihan', '{{ $pj->id_parfum_jadi }}')" @click="openJadiModal = false" class="flex justify-between items-center p-3 border dark:border-zinc-800 rounded-xl cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-950/10 hover:border-orange-500 dark:hover:border-orange-500/50 transition group">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-zinc-800 dark:text-white group-hover:text-orange-500 dark:group-hover:text-orange-400">{{ $pj->nama_parfum }}</span>
+                            <span class="text-xs text-gray-500">Sisa Stok: {{ $pj->stok_pcs }} Pcs</span>
+                        </div>
+                        <span class="font-bold text-sm text-zinc-900 dark:text-zinc-200">Rp {{ number_format($pj->harga_jual_per_pcs, 0, ',', '.') }}</span>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    </div>
+
+    <div x-show="openBotolModal" style="display: none;" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm" @click="openBotolModal = false"></div>
+        <div class="relative bg-white dark:bg-zinc-900 border dark:border-zinc-800 rounded-xl max-w-lg w-full shadow-2xl p-5 z-10 flex flex-col gap-4 max-h-[80vh]">
+            <div class="flex justify-between items-center border-b dark:border-zinc-800 pb-2">
+                <h3 class="text-lg font-bold dark:text-white">Pilih Wadah Botol</h3>
+                <button @click="openBotolModal = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">✕</button>
+            </div>
+            <div class="overflow-y-auto pr-1 flex flex-col gap-2">
+                <div wire:click="pilihBotol('bawa_sendiri')" @click="openBotolModal = false" class="flex justify-between items-center p-3 border border-dashed border-orange-400 dark:border-orange-500/40 rounded-xl cursor-pointer bg-orange-50/20 dark:bg-orange-950/10 hover:bg-orange-50 dark:hover:bg-orange-950/20 transition group">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">🧴</span>
+                        <div class="flex flex-col">
+                            <span class="font-bold text-orange-600 dark:text-orange-400">Bawa Botol Sendiri (Refill)</span>
+                            <span class="text-xs text-gray-500">Pelanggan membawa wadahnya sendiri</span>
+                        </div>
+                    </div>
+                    <span class="font-bold text-sm text-orange-600 dark:text-orange-400">Gratis</span>
+                </div>
+
+                @foreach($botols as $b)
+                    <div wire:click="pilihBotol('{{ $b->id_botol }}')" @click="openBotolModal = false" class="flex justify-between items-center p-3 border dark:border-zinc-800 rounded-xl cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-950/10 hover:border-orange-500 dark:hover:border-orange-500/50 transition group">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-zinc-800 dark:text-white group-hover:text-orange-500 dark:group-hover:text-orange-400">{{ $b->nama_botol }}</span>
+                            <span class="text-xs text-gray-500">Kapasitas: {{ $b->kapasitas_ml }} ML | Stok: {{ $b->stok_pcs }} Pcs</span>
+                        </div>
+                        <span class="font-bold text-sm text-zinc-900 dark:text-zinc-200">Rp {{ number_format($b->harga_jual_per_pcs, 0, ',', '.') }}</span>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    </div>
+
+    <div x-show="openBibitModal" style="display: none;" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="fixed inset-0 bg-zinc-950/60 backdrop-blur-sm" @click="openBibitModal = false"></div>
+        <div class="relative bg-white dark:bg-zinc-900 border dark:border-zinc-800 rounded-xl max-w-lg w-full shadow-2xl p-5 z-10 flex flex-col gap-4 max-h-[80vh]">
+            <div class="flex justify-between items-center border-b dark:border-zinc-800 pb-2">
+                <h3 class="text-lg font-bold dark:text-white">Pilih Aroma / Bibit Parfum</h3>
+                <button @click="openBibitModal = false" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">✕</button>
+            </div>
+            <div class="overflow-y-auto pr-1 flex flex-col gap-2">
+                @foreach($parfums as $p)
+                    <div wire:click="$set('id_parfum_pilihan', '{{ $p->id_parfum }}')" @click="openBibitModal = false" class="flex justify-between items-center p-3 border dark:border-zinc-800 rounded-xl cursor-pointer hover:bg-orange-50 dark:hover:bg-orange-950/10 hover:border-orange-500 dark:hover:border-orange-500/50 transition group">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-zinc-800 dark:text-white group-hover:text-orange-500 dark:group-hover:text-orange-400">{{ $p->nama_parfum }}</span>
+                            <span class="text-xs text-gray-500">Stok Gudang: {{ $p->stok_ml }} ML</span>
+                        </div>
+                        <span class="font-bold text-xs text-zinc-500 dark:text-zinc-400">Rp {{ number_format($p->harga_jual_per_ml, 0, ',', '.') }} / ML</span>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    </div>
+
 </div>
+
 <script src="https://app.sandbox.midtrans.com/snap/snap.js" data-client-key="{{ config('services.midtrans.clientKey') }}"></script>
 <script>
     window.addEventListener('pay-with-midtrans', event => {
@@ -631,7 +814,6 @@ new #[Layout('layouts.app')] #[Title('Kasir - Surya Parfum')] class extends Comp
                 alert("Pembayaran gagal atau dibatalkan!"); 
             },
             onClose: function() {
-                // Beri tahu kasir jika popup ditutup sengaja/tidak sengaja
                 alert("Anda menutup halaman pembayaran. Silakan klik tombol 'Buka Ulang Payment Gateway' jika ingin melanjutkan.");
             }
         });

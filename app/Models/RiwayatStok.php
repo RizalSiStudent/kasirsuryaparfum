@@ -7,17 +7,15 @@ use Illuminate\Database\Eloquent\Model;
 class RiwayatStok extends Model
 {
     protected $primaryKey = 'id_riwayat';
+    protected $guarded = [];
 
-    protected $fillable = [
-        'id_parfum',
-        'jenis_pergerakan',
-        'jumlah_ml',
-        'keterangan',
-    ];
-
-    // Relasi balik ke Parfum
-    public function parfum()
-    {
+    public function parfum() {
         return $this->belongsTo(Parfum::class, 'id_parfum', 'id_parfum');
+    }
+    public function botol() {
+        return $this->belongsTo(Botol::class, 'id_botol', 'id_botol');
+    }
+    public function parfumJadi() {
+        return $this->belongsTo(ParfumJadi::class, 'id_parfum_jadi', 'id_parfum_jadi');
     }
 }

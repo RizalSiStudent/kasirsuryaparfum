@@ -12,10 +12,14 @@ class Penjualan extends Model
         'no_faktur',
         'id_pengguna',
         'id_pelanggan',
+        'subtotal',          // <-- Tambahan baru
+        'potongan_diskon',   // <-- Tambahan baru
+        'uang_dibayar',      // <-- Tambahan baru
+        'kembalian',         // <-- Tambahan baru
         'total_bayar',
         'metode_pembayaran',
-        'status_pembayaran', // Wajib ditambahkan
-        'snap_token',        // Wajib ditambahkan
+        'status_pembayaran', 
+        'snap_token',        
         'waktu_transaksi',
     ];
 
@@ -28,7 +32,7 @@ class Penjualan extends Model
     }
     
     public function details()
-{
-    return $this->hasMany(DetailPenjualan::class, 'id_penjualan', 'id_penjualan');
-}
+    {
+        return $this->hasMany(DetailPenjualan::class, 'id_penjualan', 'id_penjualan');
+    }
 }

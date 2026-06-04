@@ -21,6 +21,8 @@ Route::middleware(['auth', 'role:pemilik'])->group(function () {
     Volt::route('/pemilik/laporan', 'pemilik.laporan') 
         ->name('pemilik.laporan');
     Volt::route('/pemilik/dashboard', 'pemilik.dashboard')->name('pemilik.dashboard');
+    // Tambahkan ini di dalam group route pemilik
+    Volt::route('/pemilik/diskon', 'pemilik.diskon-crud')->name('pemilik.diskon');
 });
 
 // RUTE KASIR & PEMILIK

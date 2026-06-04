@@ -7,11 +7,14 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\PenjualanExport;
 
 new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class extends Component {
     // Properti Filter
     public $tanggal_mulai;
     public $tanggal_akhir;
+    public $bulan_dipilih;
     
     // Properti Metrik
     public $total_pendapatan = 0;
@@ -29,8 +32,19 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
     {
         $this->tanggal_mulai = Carbon::now()->startOfMonth()->format('Y-m-d');
         $this->tanggal_akhir = Carbon::now()->format('Y-m-d');
+        $this->bulan_dipilih  = Carbon::now()->format('Y-m'); // format input month
+    
         $this->filterLaporan();
     }
+
+    public function terapkanBulan()
+{
+    $this->validate(['bulan_dipilih' => 'required']);
+
+    $this->tanggal_mulai = Carbon::parse($this->bulan_dipilih)->startOfMonth()->format('Y-m-d');
+    $this->tanggal_akhir = Carbon::parse($this->bulan_dipilih)->endOfMonth()->format('Y-m-d');
+    $this->filterLaporan();
+}
 
     public function filterLaporan()
     {
@@ -100,128 +114,14 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
     }
     
     public function exportExcel()
-{
-    $tanggal_mulai = Carbon::parse($this->tanggal_mulai)->startOfDay();
-    $tanggal_akhir = Carbon::parse($this->tanggal_akhir)->endOfDay();
+    {
+        $nama_file = 'Laporan_Surya_Parfum_' . date('Ymd_His') . '.xlsx'; // Ekstensi diubah ke .xlsx
 
-    $penjualan = Penjualan::with(['pengguna', 'pelanggan', 'details.parfum', 'details.botol', 'details.parfumJadi'])
-                    ->whereBetween('created_at', [$tanggal_mulai, $tanggal_akhir])
-                    ->latest()->get();
-
-    $periode   = Carbon::parse($this->tanggal_mulai)->format('d M Y') . ' s/d ' . Carbon::parse($this->tanggal_akhir)->format('d M Y');
-    $nama_file = 'Laporan_Surya_Parfum_' . date('Ymd_His') . '.xls';
-
-    $html = '
-    <html xmlns:o="urn:schemas-microsoft-com:office:office"
-          xmlns:x="urn:schemas-microsoft-com:office:excel">
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; }
-            table { border-collapse: collapse; }
-            th { font-weight: bold; text-align: center; padding: 6px 10px; border: 1px solid #000; }
-            td { padding: 6px 10px; border: 1px solid #000; vertical-align: top; }
-            .center { text-align: center; }
-            .right  { text-align: right; }
-            .bold   { font-weight: bold; }
-            .nowrap { white-space: nowrap; }
-        </style>
-    </head>
-    <body>
-    <table>
-        <tr>
-            <td colspan="9" style="font-size:13pt; font-weight:bold; text-align:center; padding:8px; border:1px solid #000;">
-                LAPORAN PENJUALAN — SURYA PARFUM
-            </td>
-        </tr>
-        <tr>
-            <td colspan="9" style="text-align:center; padding:5px; border:1px solid #000;">
-                Periode: ' . $periode . '
-            </td>
-        </tr>
-        <tr>
-            <th>No</th>
-            <th>Tanggal &amp; Waktu</th>
-            <th>No. Faktur</th>
-            <th>Kasir</th>
-            <th>Pelanggan</th>
-            <th>Item Terjual</th>
-            <th>Metode</th>
-            <th>Status</th>
-            <th>Total Belanja (Rp)</th>
-        </tr>';
-
-    $total_pendapatan = 0;
-    $no = 1;
-
-    foreach ($penjualan as $trx) {
-
-        $item_baris = [];
-        $urutan = 1;
-
-        foreach ($trx->details as $detail) {
-            if ($detail->parfumJadi) {
-                $item_baris[] = '<b>' . $urutan . '. ' . e($detail->parfumJadi->nama_parfum) . '</b><br>'
-                    . '&nbsp;&nbsp;&nbsp;' . $detail->jumlah_pcs . ' pcs &nbsp;x&nbsp; Rp ' . number_format($detail->harga_saat_transaksi, 0, ',', '.')
-                    . ' &nbsp;=&nbsp; Rp ' . number_format($detail->subtotal, 0, ',', '.');
-
-            } elseif ($detail->parfum) {
-                $botol = $detail->botol ? e($detail->botol->nama_botol) : 'Bawa Botol Sendiri';
-                $item_baris[] = '<b>' . $urutan . '. Racikan: ' . e($detail->parfum->nama_parfum) . '</b><br>'
-                    . '&nbsp;&nbsp;&nbsp;' . $detail->jumlah_ml . ' ml &nbsp;|&nbsp; ' . $botol . '<br>'
-                    . '&nbsp;&nbsp;&nbsp;Rp ' . number_format($detail->harga_saat_transaksi, 0, ',', '.')
-                    . ' &nbsp;=&nbsp; Rp ' . number_format($detail->subtotal, 0, ',', '.');
-            }
-            $urutan++;
-        }
-
-        // Pisahkan antar item dengan garis tipis
-        $item_html = implode('<br><hr style="border:none; border-top:1px solid #ccc; margin:4px 0;">', $item_baris);
-
-        $status_label = match($trx->status_pembayaran) {
-            'success' => 'Lunas',
-            'pending' => 'Pending',
-            default   => 'Gagal',
-        };
-
-        $html .= '
-        <tr>
-            <td class="center">' . $no . '</td>
-            <td class="nowrap">' . Carbon::parse($trx->waktu_transaksi)->format('d/m/Y H:i') . '</td>
-            <td class="nowrap bold">' . e($trx->no_faktur) . '</td>
-            <td>' . e($trx->pengguna->name) . '</td>
-            <td>' . e($trx->pelanggan ? $trx->pelanggan->nama_pelanggan : 'Umum') . '</td>
-            <td style="min-width:280px;">' . $item_html . '</td>
-            <td class="center">' . e($trx->metode_pembayaran) . '</td>
-            <td class="center">' . $status_label . '</td>
-            <td class="right bold nowrap">Rp ' . number_format($trx->total_bayar, 0, ',', '.') . '</td>
-        </tr>';
-
-        if ($trx->status_pembayaran === 'success') {
-            $total_pendapatan += $trx->total_bayar;
-        }
-        $no++;
+        return Excel::download(
+            new PenjualanExport($this->tanggal_mulai, $this->tanggal_akhir), 
+            $nama_file
+        );
     }
-
-    if ($penjualan->isEmpty()) {
-        $html .= '<tr><td colspan="9" style="text-align:center; padding:16px; font-style:italic;">Tidak ada transaksi pada rentang tanggal tersebut.</td></tr>';
-    }
-
-    $html .= '
-        <tr>
-            <td colspan="8" class="right bold" style="border:2px solid #000;">TOTAL PENDAPATAN</td>
-            <td class="right bold nowrap" style="border:2px solid #000;">Rp ' . number_format($total_pendapatan, 0, ',', '.') . '</td>
-        </tr>
-    </table>
-    </body></html>';
-
-    return response()->streamDownload(function () use ($html) {
-        echo $html;
-    }, $nama_file, [
-        'Content-Type'        => 'application/vnd.ms-excel; charset=UTF-8',
-        'Content-Disposition' => 'attachment; filename="' . $nama_file . '"',
-    ]);
-}
 }; ?>
 
 <!-- x-data untuk mendeteksi state open/close Modal melalui AlpineJS -->
@@ -236,30 +136,49 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
             </div>
         </div>
 
-        <div class="bg-white dark:bg-zinc-800 p-5 rounded-lg border dark:border-zinc-700 shadow-sm flex flex-col md:flex-row gap-4 items-end">
-            <div>
-                <label class="block text-sm font-medium mb-1 dark:text-gray-200">Dari Tanggal</label>
-                <input type="date" wire:model="tanggal_mulai" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2">
+       <div class="bg-white dark:bg-zinc-800 p-3 rounded-lg border dark:border-zinc-700 shadow-sm flex flex-col md:flex-row gap-4 items-end justify-between">
+            
+            <div class="flex flex-col md:flex-row gap-2 items-end w-full md:w-auto">
+                <div>
+                    <label class="block text-xs font-medium mb-1 dark:text-gray-300">Dari Tanggal</label>
+                    <input type="date" wire:model="tanggal_mulai" class="text-sm border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-md px-2.5 py-1.5 w-full md:w-36 focus:ring-orange-500 focus:border-orange-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium mb-1 dark:text-gray-300">Sampai Tanggal</label>
+                    <input type="date" wire:model="tanggal_akhir" class="text-sm border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-md px-2.5 py-1.5 w-full md:w-36 focus:ring-orange-500 focus:border-orange-500">
+                </div>
+                <div class="flex gap-1.5">
+                    <button wire:click="filterLaporan" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-1.5 px-3 rounded-md shadow-sm transition-all flex items-center gap-1">
+                        🔍 Cari
+                    </button>
+                    <button wire:click="setHariIni" class="bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-zinc-800 dark:text-white text-sm font-semibold py-1.5 px-3 rounded-md shadow-sm transition-all">
+                        Hari Ini
+                    </button>
+                </div>
             </div>
-            <div>
-                <label class="block text-sm font-medium mb-1 dark:text-gray-200">Sampai Tanggal</label>
-                <input type="date" wire:model="tanggal_akhir" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-lg px-3 py-2">
+
+            <div class="hidden md:block w-px h-10 bg-gray-200 dark:bg-zinc-700"></div>
+            <div class="block md:hidden w-full h-px bg-gray-200 dark:bg-zinc-700 my-1"></div>
+
+            <div class="flex flex-col md:flex-row gap-2 items-end w-full md:w-auto">
+                <div>
+                    <label class="block text-xs font-medium mb-1 dark:text-gray-300">Bulan & Tahun</label>
+                    <input type="month" wire:model="bulan_dipilih" class="text-sm border dark:border-zinc-600 dark:bg-zinc-900 dark:text-white rounded-md px-2.5 py-1.5 w-full md:w-40 focus:ring-orange-500 focus:border-orange-500">
+                </div>
+                <div class="flex gap-1.5">
+                    <button wire:click="terapkanBulan" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-1.5 px-3 rounded-md shadow-sm transition-all flex items-center gap-1" title="Tampilkan data bulan ini">
+                        📅 Tampilkan
+                    </button>
+                    <button wire:click="exportExcel" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold py-1.5 px-3 rounded-md shadow-sm transition-all flex items-center gap-1" title="Export Excel sesuai rentang tanggal">
+                        📊 Export
+                    </button>
+                </div>
             </div>
-            <div class="flex gap-2">
-                <button wire:click="filterLaporan" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-sm transition-all">
-                    🔍 Terapkan Filter
-                </button>
-                <button wire:click="setHariIni" class="bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-zinc-800 dark:text-white font-bold py-2 px-4 rounded-lg shadow-sm transition-all">
-                    Hari Ini Saja
-                </button>
-                <button wire:click="exportExcel" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg shadow-sm transition-all flex items-center gap-2">
-                    📊 Export Excel
-                </button>
-            </div>
+
         </div>
         
-        @error('tanggal_akhir') 
-            <span class="text-red-500 text-sm -mt-4 block">{{ $message }}</span> 
+        @error('tanggal_akhir')
+            <div class="text-red-500 text-xs mt-1">{{ $message }}</div>
         @enderror
 
         <div class="mb-2 border-b dark:border-zinc-700 pb-2">
@@ -346,7 +265,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                                                     </div>
                                                 </div>
                                             </li>
-                                        <!-- PERBAIKAN: Kondisi jika ada parfum racikan (tidak wajib ada botol) -->
                                         @elseif($detail->parfum)
                                             <li class="border-b border-zinc-100 dark:border-zinc-700 pb-2 last:border-0 last:pb-0">
                                                 <div class="flex flex-col">
@@ -354,7 +272,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                                                     <div class="flex items-center text-xs mt-0.5">
                                                         <span>{{ $detail->jumlah_ml }} ml</span>
                                                         <span class="mx-1.5 text-zinc-300 dark:text-zinc-600">|</span>
-                                                        <!-- Cek apakah pelanggan bawa botol sendiri -->
                                                         @if($detail->botol)
                                                             <span>Botol {{ $detail->botol->nama_botol }}</span>
                                                         @else
@@ -370,6 +287,19 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                                         @endif
                                     @endforeach
                                 </ul>
+
+                                @if($trx->potongan_diskon > 0)
+                                    <div class="mt-3 pt-2 border-t border-dashed border-zinc-300 dark:border-zinc-600 text-xs">
+                                        <div class="flex justify-between text-zinc-500 dark:text-zinc-400 mb-0.5">
+                                            <span>Subtotal:</span>
+                                            <span>Rp {{ number_format($trx->subtotal, 0, ',', '.') }}</span>
+                                        </div>
+                                        <div class="flex justify-between text-orange-600 dark:text-orange-400 font-bold">
+                                            <span>Diskon/Promo:</span>
+                                            <span>- Rp {{ number_format($trx->potongan_diskon, 0, ',', '.') }}</span>
+                                        </div>
+                                    </div>
+                                @endif
                             </td>
 
                             <td class="px-4 py-3 align-top">

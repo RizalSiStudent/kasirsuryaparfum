@@ -19,63 +19,79 @@
             </flux:sidebar.header>
 
             <flux:sidebar.nav>
-                <flux:sidebar.group :heading="__('Platform')" class="grid">
-                    
-                @if(auth()->check() && auth()->user()->peran === 'pemilik')
-                    <flux:sidebar.item icon="home" :href="route('pemilik.dashboard')" :current="request()->routeIs('pemilik.dashboard')" wire:navigate>
-                        {{ __('Dashboard') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="beaker" :href="route('pemilik.parfum')" :current="request()->routeIs('pemilik.parfum')" wire:navigate>
-                        {{ __('Data Parfum') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="sparkles" :href="route('pemilik.parfum-jadi')" :current="request()->routeIs('pemilik.parfum-jadi')" wire:navigate>
-                        {{ __('Data Parfum Jadi') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="cube" :href="route('pemilik.botol')" :current="request()->routeIs('pemilik.botol')" wire:navigate>
-                        {{ __('Data Botol') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="truck" :href="route('pemilik.supplier')" :current="request()->routeIs('pemilik.supplier')" wire:navigate>
-                        {{ __('Data Supplier') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="users" :href="route('pemilik.pelanggan')" :current="request()->routeIs('pemilik.pelanggan')" wire:navigate>
-                        {{ __('Data Pelanggan') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="identification" :href="route('pemilik.karyawan')" :current="request()->routeIs('pemilik.karyawan')" wire:navigate>
-                        {{ __('Kelola Karyawan') }}
-                    </flux:sidebar.item>
-                    <flux:sidebar.item icon="chart-bar" :href="route('pemilik.laporan')" :current="request()->routeIs('pemilik.laporan')" wire:navigate>
-                        {{ __('Laporan Penjualan') }}
-                    </flux:sidebar.item>
+                @if(auth()->check())
+                    @php $peran = auth()->user()->peran; @endphp
+
+                    {{-- MENU KHUSUS PEMILIK --}}
+                    @if($peran === 'pemilik')
+                        <flux:sidebar.group :heading="__('Platform')" class="grid">
+                            <flux:sidebar.item icon="home" :href="route('pemilik.dashboard')" :current="request()->routeIs('pemilik.dashboard')" wire:navigate>
+                                {{ __('Dashboard') }}
+                            </flux:sidebar.item>
+                        </flux:sidebar.group>
+
+                        <flux:sidebar.group :heading="__('Barang Utama')" class="grid">
+                            <flux:sidebar.item icon="beaker" :href="route('pemilik.parfum')" :current="request()->routeIs('pemilik.parfum')" wire:navigate>
+                                {{ __('Data Parfum') }}
+                            </flux:sidebar.item>
+                            <flux:sidebar.item icon="sparkles" :href="route('pemilik.parfum-jadi')" :current="request()->routeIs('pemilik.parfum-jadi')" wire:navigate>
+                                {{ __('Data Parfum Jadi') }}
+                            </flux:sidebar.item>
+                            <flux:sidebar.item icon="cube" :href="route('pemilik.botol')" :current="request()->routeIs('pemilik.botol')" wire:navigate>
+                                {{ __('Data Botol') }}
+                            </flux:sidebar.item>
+                            <flux:sidebar.item icon="truck" :href="route('pemilik.supplier')" :current="request()->routeIs('pemilik.supplier')" wire:navigate>
+                                {{ __('Data Supplier') }}
+                            </flux:sidebar.item>
+                            <flux:sidebar.item icon="clipboard-document-list" :href="route('admin-stok.kelola')" :current="request()->routeIs('admin-stok.kelola')" wire:navigate>
+                                {{ __('Kelola Stok & Retur') }}
+                            </flux:sidebar.item>
+                        </flux:sidebar.group>
+
+                        <flux:sidebar.group :heading="__('Pengguna')" class="grid">
+                            <flux:sidebar.item icon="users" :href="route('pemilik.pelanggan')" :current="request()->routeIs('pemilik.pelanggan')" wire:navigate>
+                                {{ __('Data Pelanggan') }}
+                            </flux:sidebar.item>
+                            <flux:sidebar.item icon="identification" :href="route('pemilik.karyawan')" :current="request()->routeIs('pemilik.karyawan')" wire:navigate>
+                                {{ __('Kelola Karyawan') }}
+                            </flux:sidebar.item>
+                        </flux:sidebar.group>
+
+                        <flux:sidebar.group :heading="__('Transaksi & Laporan')" class="grid">
+                            <flux:sidebar.item icon="shopping-cart" :href="route('kasir.penjualan')" :current="request()->routeIs('kasir.penjualan')" wire:navigate>
+                                {{ __('Mesin Kasir (POS)') }}
+                            </flux:sidebar.item>
+                        <flux:sidebar.item icon="ticket" :href="route('pemilik.diskon')" :current="request()->routeIs('pemilik.diskon')" wire:navigate>
+        {{ __('Event Diskon') }}
+    </flux:sidebar.item>
+                            <flux:sidebar.item icon="chart-bar" :href="route('pemilik.laporan')" :current="request()->routeIs('pemilik.laporan')" wire:navigate>
+                                {{ __('Laporan Penjualan') }}
+                            </flux:sidebar.item>
+                        </flux:sidebar.group>
+
+                    {{-- MENU KHUSUS KASIR --}}
+                    @elseif($peran === 'kasir')
+                        <flux:sidebar.group :heading="__('Platform')" class="grid">
+                            <flux:sidebar.item icon="home" :href="route('kasir.dashboard')" :current="request()->routeIs('kasir.dashboard')" wire:navigate>
+                                {{ __('Dashboard Kasir') }}
+                            </flux:sidebar.item>
+                            <flux:sidebar.item icon="shopping-cart" :href="route('kasir.penjualan')" :current="request()->routeIs('kasir.penjualan')" wire:navigate>
+                                {{ __('Mesin Kasir (POS)') }}
+                            </flux:sidebar.item>
+                        </flux:sidebar.group>
+
+                    {{-- MENU KHUSUS ADMIN STOK --}}
+                    @elseif($peran === 'admin_stok')
+                        <flux:sidebar.group :heading="__('Platform')" class="grid">
+                            <flux:sidebar.item icon="home" :href="route('admin-stok.dashboard')" :current="request()->routeIs('admin-stok.dashboard')" wire:navigate>
+                                {{ __('Dashboard Gudang') }}
+                            </flux:sidebar.item>
+                            <flux:sidebar.item icon="clipboard-document-list" :href="route('admin-stok.kelola')" :current="request()->routeIs('admin-stok.kelola')" wire:navigate>
+                                {{ __('Kelola Stok & Retur') }}
+                            </flux:sidebar.item>
+                        </flux:sidebar.group>
+                    @endif
                 @endif
-
-                @if(auth()->check() && in_array(auth()->user()->peran, ['kasir', 'pemilik']))
-    {{-- Menu ini sekarang hanya muncul jika perannya adalah kasir --}}
-    @if(auth()->user()->peran === 'kasir')
-        <flux:sidebar.item icon="home" :href="route('kasir.dashboard')" :current="request()->routeIs('kasir.dashboard')" wire:navigate>
-            {{ __('Dashboard Kasir') }}
-        </flux:sidebar.item>
-    @endif
-    
-    {{-- Pemilik dan Kasir tetap bisa melihat Mesin Kasir --}}
-    <flux:sidebar.item icon="shopping-cart" :href="route('kasir.penjualan')" :current="request()->routeIs('kasir.penjualan')" wire:navigate>
-        {{ __('Mesin Kasir (POS)') }}
-    </flux:sidebar.item>
-@endif
-
-                @if(auth()->check() && in_array(auth()->user()->peran, ['admin_stok', 'pemilik']))
-    {{-- Menu ini sekarang hanya muncul jika perannya adalah admin_stok --}}
-    @if(auth()->user()->peran === 'admin_stok')
-        <flux:sidebar.item icon="home" :href="route('admin-stok.dashboard')" :current="request()->routeIs('admin-stok.dashboard')" wire:navigate>
-            {{ __('Dashboard Gudang') }}
-        </flux:sidebar.item>
-    @endif
-
-    {{-- Pemilik dan Admin Stok tetap bisa melihat Kelola Stok --}}
-    <flux:sidebar.item icon="clipboard-document-list" :href="route('admin-stok.kelola')" :current="request()->routeIs('admin-stok.kelola')" wire:navigate>
-        {{ __('Kelola Stok & Retur') }}
-    </flux:sidebar.item>
-@endif
-                </flux:sidebar.group>
             </flux:sidebar.nav>
 
             <flux:spacer />
