@@ -6,8 +6,11 @@ use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 
 new #[Layout('layouts.app')] #[Title('Data Supplier - Surya Parfum')] class extends Component {
-    public $suppliers, $nama_supplier, $no_telepon, $alamat, $id_supplier;
+    public $suppliers, $nama_perusahaan, $nama_supplier, $no_telepon, $alamat, $id_supplier;
     public $isOpen = false;
+    
+    // Properti pencarian
+    public $search = '';
 
     public function mount()
     {
@@ -16,7 +19,20 @@ new #[Layout('layouts.app')] #[Title('Data Supplier - Surya Parfum')] class exte
 
     public function loadSuppliers()
     {
-        $this->suppliers = Supplier::all();
+        if ($this->search) {
+            $this->suppliers = Supplier::where('nama_perusahaan', 'like', '%' . $this->search . '%')
+                                       ->orWhere('nama_supplier', 'like', '%' . $this->search . '%')
+                                       ->orderBy('nama_perusahaan', 'asc')
+                                       ->get();
+        } else {
+            $this->suppliers = Supplier::orderBy('nama_perusahaan', 'asc')->get();
+        }
+    }
+
+    // Fungsi yang otomatis dipanggil saat kolom pencarian diketik
+    public function updatedSearch()
+    {
+        $this->loadSuppliers();
     }
 
     public function create()
@@ -38,20 +54,27 @@ new #[Layout('layouts.app')] #[Title('Data Supplier - Surya Parfum')] class exte
     public function resetFields()
     {
         $this->id_supplier = '';
+        $this->nama_perusahaan = '';
         $this->nama_supplier = '';
         $this->no_telepon = '';
         $this->alamat = '';
+        $this->resetErrorBag();
     }
 
     public function store()
     {
         $this->validate([
+            'nama_perusahaan' => 'required|string|max:100',
             'nama_supplier' => 'required|string|max:100',
             'no_telepon' => 'nullable|string|max:15',
             'alamat' => 'nullable|string',
+        ], [
+            'nama_perusahaan.required' => 'Nama Perusahaan wajib diisi.',
+            'nama_supplier.required' => 'Nama kontak / penanggung jawab wajib diisi.',
         ]);
 
         Supplier::updateOrCreate(['id_supplier' => $this->id_supplier], [
+            'nama_perusahaan' => $this->nama_perusahaan,
             'nama_supplier' => $this->nama_supplier,
             'no_telepon' => $this->no_telepon,
             'alamat' => $this->alamat,
@@ -66,8 +89,10 @@ new #[Layout('layouts.app')] #[Title('Data Supplier - Surya Parfum')] class exte
 
     public function edit($id)
     {
+        $this->resetErrorBag();
         $supplier = Supplier::findOrFail($id);
         $this->id_supplier = $id;
+        $this->nama_perusahaan = $supplier->nama_perusahaan;
         $this->nama_supplier = $supplier->nama_supplier;
         $this->no_telepon = $supplier->no_telepon;
         $this->alamat = $supplier->alamat;
@@ -106,19 +131,24 @@ new #[Layout('layouts.app')] #[Title('Data Supplier - Surya Parfum')] class exte
                     <form wire:submit.prevent="store">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-sm font-medium mb-1">Nama Supplier</label>
-                                <input type="text" wire:model="nama_supplier" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 rounded-lg px-3 py-2">
-                                @error('nama_supplier') <span class="text-red-500 text-sm">{{ $message }}</span> @enderror
+                                <label class="block text-sm font-medium mb-1">Nama Perusahaan <span class="text-red-500">*</span></label>
+                                <input type="text" wire:model="nama_perusahaan" placeholder="PT / CV / Toko..." class="w-full border @error('nama_perusahaan') border-red-500 @else dark:border-zinc-600 @enderror dark:bg-zinc-900 rounded-lg px-3 py-2">
+                                @error('nama_perusahaan') <span class="text-red-500 text-sm mt-1 block">{{ $message }}</span> @enderror
                             </div>
                             <div>
+                                <label class="block text-sm font-medium mb-1">Nama Merk <span class="text-red-500">*</span></label>
+                                <input type="text" wire:model="nama_supplier" placeholder="Nama penanggung jawab..." class="w-full border @error('nama_supplier') border-red-500 @else dark:border-zinc-600 @enderror dark:bg-zinc-900 rounded-lg px-3 py-2">
+                                @error('nama_supplier') <span class="text-red-500 text-sm mt-1 block">{{ $message }}</span> @enderror
+                            </div>
+                            <div class="md:col-span-2 lg:col-span-1">
                                 <label class="block text-sm font-medium mb-1">No. Telepon</label>
-                                <input type="text" wire:model="no_telepon" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 rounded-lg px-3 py-2">
-                                @error('no_telepon') <span class="text-red-500 text-sm">{{ $message }}</span> @enderror
+                                <input type="text" wire:model="no_telepon" class="w-full border @error('no_telepon') border-red-500 @else dark:border-zinc-600 @enderror dark:bg-zinc-900 rounded-lg px-3 py-2">
+                                @error('no_telepon') <span class="text-red-500 text-sm mt-1 block">{{ $message }}</span> @enderror
                             </div>
                             <div class="md:col-span-2">
                                 <label class="block text-sm font-medium mb-1">Alamat</label>
-                                <textarea wire:model="alamat" class="w-full border dark:border-zinc-600 dark:bg-zinc-900 rounded-lg px-3 py-2" rows="3"></textarea>
-                                @error('alamat') <span class="text-red-500 text-sm">{{ $message }}</span> @enderror
+                                <textarea wire:model="alamat" class="w-full border @error('alamat') border-red-500 @else dark:border-zinc-600 @enderror dark:bg-zinc-900 rounded-lg px-3 py-2" rows="3"></textarea>
+                                @error('alamat') <span class="text-red-500 text-sm mt-1 block">{{ $message }}</span> @enderror
                             </div>
                         </div>
                         <div class="mt-6 flex gap-3">
@@ -129,23 +159,34 @@ new #[Layout('layouts.app')] #[Title('Data Supplier - Surya Parfum')] class exte
                 </div>
             @endif
 
-            <div class="overflow-hidden rounded-lg border dark:border-zinc-700 shadow-sm">
+            <div class="mb-4">
+                <div class="relative w-full md:w-1/3">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </div>
+                    <input type="text" wire:model.live.debounce.300ms="search" placeholder="Cari nama perusahaan atau nama merk..." class="w-full pl-9 border border-gray-300 dark:border-zinc-600 dark:bg-zinc-900 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
+                </div>
+            </div>
+
+            <div class="overflow-x-auto rounded-lg border dark:border-zinc-700 shadow-sm">
                 <table class="min-w-full bg-white dark:bg-zinc-900">
                     <thead>
                         <tr class="bg-zinc-100 dark:bg-zinc-800 border-b dark:border-zinc-700">
-                            <th class="px-4 py-3 text-left font-semibold">Nama Supplier</th>
-                            <th class="px-4 py-3 text-left font-semibold">No. Telepon</th>
+                            <th class="px-4 py-3 text-left font-semibold whitespace-nowrap">Nama Perusahaan</th>
+                            <th class="px-4 py-3 text-left font-semibold whitespace-nowrap">Nama Merk</th>
+                            <th class="px-4 py-3 text-left font-semibold whitespace-nowrap">No. Telepon</th>
                             <th class="px-4 py-3 text-left font-semibold">Alamat</th>
-                            <th class="px-4 py-3 text-center font-semibold">Aksi</th>
+                            <th class="px-4 py-3 text-center font-semibold whitespace-nowrap">Aksi</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y dark:divide-zinc-700">
                         @foreach($suppliers as $supplier)
                         <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
-                            <td class="px-4 py-3">{{ $supplier->nama_supplier }}</td>
-                            <td class="px-4 py-3">{{ $supplier->no_telepon ?? '-' }}</td>
-                            <td class="px-4 py-3">{{ $supplier->alamat ?? '-' }}</td>
-                            <td class="px-4 py-3 text-center">
+                            <td class="px-4 py-3 whitespace-nowrap">{{ $supplier->nama_perusahaan }}</td>
+                            <td class="px-4 py-3 whitespace-nowrap">{{ $supplier->nama_supplier }}</td>
+                            <td class="px-4 py-3 whitespace-nowrap">{{ $supplier->no_telepon ?? '-' }}</td>
+                            <td class="px-4 py-3">{{ Str::limit($supplier->alamat ?? '-', 40) }}</td>
+                            <td class="px-4 py-3 text-center whitespace-nowrap">
                                 <button wire:click="edit({{ $supplier->id_supplier }})" class="text-yellow-600 hover:text-yellow-800 px-2 font-medium">Edit</button>
                                 <button wire:click="delete({{ $supplier->id_supplier }})" class="text-red-600 hover:text-red-800 px-2 font-medium" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</button>
                             </td>
@@ -154,7 +195,9 @@ new #[Layout('layouts.app')] #[Title('Data Supplier - Surya Parfum')] class exte
                         
                         @if(count($suppliers) == 0)
                         <tr>
-                            <td colspan="4" class="px-4 py-8 text-center text-zinc-500">Belum ada data supplier.</td>
+                            <td colspan="5" class="px-4 py-8 text-center text-zinc-500">
+                                {{ $search ? 'Tidak ada data supplier yang cocok dengan pencarian Anda.' : 'Belum ada data supplier.' }}
+                            </td>
                         </tr>
                         @endif
                     </tbody>

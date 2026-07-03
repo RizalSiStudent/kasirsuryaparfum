@@ -32,19 +32,19 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
     {
         $this->tanggal_mulai = Carbon::now()->startOfMonth()->format('Y-m-d');
         $this->tanggal_akhir = Carbon::now()->format('Y-m-d');
-        $this->bulan_dipilih  = Carbon::now()->format('Y-m'); // format input month
+        $this->bulan_dipilih  = Carbon::now()->format('Y-m'); 
     
         $this->filterLaporan();
     }
 
     public function terapkanBulan()
-{
-    $this->validate(['bulan_dipilih' => 'required']);
+    {
+        $this->validate(['bulan_dipilih' => 'required']);
 
-    $this->tanggal_mulai = Carbon::parse($this->bulan_dipilih)->startOfMonth()->format('Y-m-d');
-    $this->tanggal_akhir = Carbon::parse($this->bulan_dipilih)->endOfMonth()->format('Y-m-d');
-    $this->filterLaporan();
-}
+        $this->tanggal_mulai = Carbon::parse($this->bulan_dipilih)->startOfMonth()->format('Y-m-d');
+        $this->tanggal_akhir = Carbon::parse($this->bulan_dipilih)->endOfMonth()->format('Y-m-d');
+        $this->filterLaporan();
+    }
 
     public function filterLaporan()
     {
@@ -58,52 +58,86 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
 
         $query = Penjualan::whereBetween('created_at', [$mulai, $akhir]);
 
-        // Hitung Metrik Dinamis HANYA UNTUK TRANSAKSI SUKSES/LUNAS
-        $this->total_pendapatan = (clone $query)->where('status_pembayaran', 'success')->sum('total_bayar');
-        $this->total_transaksi = (clone $query)->where('status_pembayaran', 'success')->count();
+        // Ambil Data Transaksi LUNAS untuk hitung Rekap & Metrik
+        $penjualans_sukses = (clone $query)->where('status_pembayaran', 'success')
+                                           ->with(['details.parfum', 'details.botol', 'details.parfumJadi'])
+                                           ->get();
+        
+        $this->total_pendapatan = $penjualans_sukses->sum('total_bayar');
+        $this->total_transaksi = $penjualans_sukses->count();
         $this->rata_rata_transaksi = $this->total_transaksi > 0 ? $this->total_pendapatan / $this->total_transaksi : 0;
+        
+        $laba = 0;
+        $rekap_jadi = [];
+        $rekap_bibit = [];
+        $rekap_botol = [];
 
-        // Ambil Daftar Transaksi DENGAN relasi barang untuk menampilkannya di tabel
+        // ALGORITMA PENGELOMPOKAN REKAP BARANG (Mencegah Botol Terhitung Ganda)
+        foreach ($penjualans_sukses as $trx) {
+            $current_racikan = null;
+
+            foreach ($trx->details as $detail) {
+                // Hitung Laba
+                $laba += ($detail->subtotal - ($detail->subtotal_modal ?? 0));
+
+                if ($detail->parfumJadi) {
+                    $id = $detail->id_parfum_jadi;
+                    if (!isset($rekap_jadi[$id])) {
+                        $rekap_jadi[$id] = ['nama' => $detail->parfumJadi->nama_parfum, 'total_qty' => 0];
+                    }
+                    $rekap_jadi[$id]['total_qty'] += $detail->jumlah_pcs;
+                    $current_racikan = null;
+
+                } elseif ($detail->parfum) {
+                    // Deteksi Harga Botol
+                    $harga_bibit_normal = $detail->parfum->harga_jual_per_ml * $detail->jumlah_ml;
+                    $selisih = $detail->subtotal - $harga_bibit_normal;
+                    $indikasi_termasuk_botol = $selisih > 1;
+
+                    // 1. Rekap Bibit (Selalu dijumlahkan)
+                    $id_parfum = $detail->id_parfum;
+                    if (!isset($rekap_bibit[$id_parfum])) {
+                        $rekap_bibit[$id_parfum] = ['nama' => $detail->parfum->nama_parfum, 'total_ml' => 0];
+                    }
+                    $rekap_bibit[$id_parfum]['total_ml'] += $detail->jumlah_ml;
+
+                    // 2. Rekap Botol (Hanya Dihitung Jika Memulai Racikan Baru)
+                    $start_new = false;
+                    if (!$current_racikan) {
+                        $start_new = true;
+                    } elseif ($indikasi_termasuk_botol) {
+                        $start_new = true; // Ada harga botol baru = racikan baru
+                    } elseif ($detail->id_botol !== $current_racikan['id_botol']) {
+                        $start_new = true; // Beda botol = racikan baru
+                    }
+
+                    if ($start_new) {
+                        $current_racikan = [
+                            'id_botol' => $detail->id_botol,
+                            'botol' => $detail->botol
+                        ];
+
+                        if ($detail->id_botol && $detail->botol) {
+                            $id_botol = $detail->id_botol;
+                            if (!isset($rekap_botol[$id_botol])) {
+                                $rekap_botol[$id_botol] = ['nama' => $detail->botol->nama_botol, 'total_pcs' => 0];
+                            }
+                            $rekap_botol[$id_botol]['total_pcs'] += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        $this->total_laba = $laba;
+        
+        // Konversi ke Object untuk View
+        $this->summary_parfum_jadi = collect($rekap_jadi)->map(fn($item) => (object) $item)->values()->all();
+        $this->summary_bibit = collect($rekap_bibit)->map(fn($item) => (object) $item)->values()->all();
+        $this->summary_botol = collect($rekap_botol)->map(fn($item) => (object) $item)->values()->all();
+
+        // Ambil Daftar Semua Transaksi (termasuk pending/gagal) untuk di Tabel
         $this->riwayat_penjualan = (clone $query)->with(['pengguna', 'pelanggan', 'details.parfum', 'details.botol', 'details.parfumJadi'])->latest()->get();
-                                                 
-        $this->total_laba = DB::table('detail_penjualans')
-            ->join('penjualans', 'detail_penjualans.id_penjualan', '=', 'penjualans.id_penjualan')
-            ->where('penjualans.status_pembayaran', 'success')
-            ->whereBetween('penjualans.created_at', [$mulai, $akhir])
-            ->selectRaw('SUM(detail_penjualans.subtotal - COALESCE(detail_penjualans.subtotal_modal, 0)) as laba')
-            ->value('laba') ?? 0;
-
-        // --- REKAP BARANG TERJUAL (Versi Ringkas Menggunakan SQL) ---
-
-        // 1. Rekap Parfum Jadi
-        $this->summary_parfum_jadi = DB::table('detail_penjualans')
-            ->join('penjualans', 'detail_penjualans.id_penjualan', '=', 'penjualans.id_penjualan')
-            ->join('parfum_jadis', 'detail_penjualans.id_parfum_jadi', '=', 'parfum_jadis.id_parfum_jadi')
-            ->where('penjualans.status_pembayaran', 'success')
-            ->whereBetween('penjualans.created_at', [$mulai, $akhir])
-            ->selectRaw('parfum_jadis.nama_parfum as nama, SUM(detail_penjualans.jumlah_pcs) as total_qty')
-            ->groupBy('parfum_jadis.id_parfum_jadi', 'parfum_jadis.nama_parfum')
-            ->get();
-
-        // 2. Rekap Bibit (Racikan)
-        $this->summary_bibit = DB::table('detail_penjualans')
-            ->join('penjualans', 'detail_penjualans.id_penjualan', '=', 'penjualans.id_penjualan')
-            ->join('parfums', 'detail_penjualans.id_parfum', '=', 'parfums.id_parfum')
-            ->where('penjualans.status_pembayaran', 'success')
-            ->whereBetween('penjualans.created_at', [$mulai, $akhir])
-            ->selectRaw('parfums.nama_parfum as nama, SUM(detail_penjualans.jumlah_ml) as total_ml')
-            ->groupBy('parfums.id_parfum', 'parfums.nama_parfum')
-            ->get();
-
-        // 3. Rekap Botol Terpakai
-        $this->summary_botol = DB::table('detail_penjualans')
-            ->join('penjualans', 'detail_penjualans.id_penjualan', '=', 'penjualans.id_penjualan')
-            ->join('botols', 'detail_penjualans.id_botol', '=', 'botols.id_botol')
-            ->where('penjualans.status_pembayaran', 'success')
-            ->whereBetween('penjualans.created_at', [$mulai, $akhir])
-            ->selectRaw('botols.nama_botol as nama, SUM(COALESCE(detail_penjualans.jumlah_pcs, 1)) as total_pcs')
-            ->groupBy('botols.id_botol', 'botols.nama_botol')
-            ->get();
     }
 
     public function setHariIni()
@@ -115,7 +149,7 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
     
     public function exportExcel()
     {
-        $nama_file = 'Laporan_Surya_Parfum_' . date('Ymd_His') . '.xlsx'; // Ekstensi diubah ke .xlsx
+        $nama_file = 'Laporan_Surya_Parfum_' . date('Ymd_His') . '.xlsx'; 
 
         return Excel::download(
             new PenjualanExport($this->tanggal_mulai, $this->tanggal_akhir), 
@@ -124,7 +158,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
     }
 }; ?>
 
-<!-- x-data untuk mendeteksi state open/close Modal melalui AlpineJS -->
 <div x-data="{ showItemModal: false }">
     <div class="flex h-full w-full flex-1 flex-col gap-6 rounded-xl p-6">
         
@@ -137,7 +170,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
         </div>
 
        <div class="bg-white dark:bg-zinc-800 p-3 rounded-lg border dark:border-zinc-700 shadow-sm flex flex-col md:flex-row gap-4 items-end justify-between">
-            
             <div class="flex flex-col md:flex-row gap-2 items-end w-full md:w-auto">
                 <div>
                     <label class="block text-xs font-medium mb-1 dark:text-gray-300">Dari Tanggal</label>
@@ -174,7 +206,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                     </button>
                 </div>
             </div>
-
         </div>
         
         @error('tanggal_akhir')
@@ -193,7 +224,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                 <p class="text-3xl font-bold">Rp {{ number_format($total_pendapatan, 0, ',', '.') }}</p>
             </div>
             
-            <!-- Card Interaktif: Bisa Di-klik -->
             <div @click="showItemModal = true" class="bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-lg text-white shadow-md cursor-pointer hover:scale-105 transition-transform duration-200 relative group overflow-hidden">
                 <h3 class="text-blue-100 text-sm font-medium mb-1">Total Transaksi (Nota)</h3>
                 <p class="text-3xl font-bold">{{ $total_transaksi }} <span class="text-lg font-normal">Kali</span></p>
@@ -251,36 +281,103 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                             <td class="px-4 py-3 align-top">{{ $trx->pengguna->name }}</td>
                             <td class="px-4 py-3 align-top">{{ $trx->pelanggan ? $trx->pelanggan->nama_pelanggan : 'Umum' }}</td>
                             
-                            <!-- Kolom Daftar Item Terjual -->
                             <td class="px-4 py-3 align-top">
-                                <ul class="list-disc list-inside space-y-2 text-xs text-zinc-600 dark:text-zinc-400">
-                                    @foreach($trx->details as $detail)
-                                        @if($detail->parfumJadi)
+                                @php
+                                    // ALGORITMA PENGELOMPOKAN RACIKAN UNTUK TABEL
+                                    $grouped_items = [];
+                                    $current_racikan = null;
+
+                                    foreach ($trx->details as $detail) {
+                                        if ($detail->parfumJadi) {
+                                            if ($current_racikan) {
+                                                $grouped_items[] = ['type' => 'racikan', 'data' => $current_racikan];
+                                                $current_racikan = null;
+                                            }
+                                            $grouped_items[] = ['type' => 'jadi', 'data' => $detail];
+                                        } elseif ($detail->parfum) {
+                                            $is_bawa_sendiri = empty($detail->id_botol);
+                                            
+                                            $harga_bibit_normal = $detail->parfum->harga_jual_per_ml * $detail->jumlah_ml;
+                                            $selisih = $detail->subtotal - $harga_bibit_normal;
+                                            $indikasi_termasuk_botol = $selisih > 1;
+
+                                            $start_new = false;
+                                            if (!$current_racikan) {
+                                                $start_new = true;
+                                            } elseif ($indikasi_termasuk_botol) {
+                                                $start_new = true;
+                                            } elseif ($detail->id_botol !== $current_racikan['id_botol']) {
+                                                $start_new = true;
+                                            }
+
+                                            if ($start_new) {
+                                                if ($current_racikan) {
+                                                    $grouped_items[] = ['type' => 'racikan', 'data' => $current_racikan];
+                                                }
+                                                $current_racikan = [
+                                                    'id_botol' => $detail->id_botol,
+                                                    'botol' => $detail->botol,
+                                                    'is_bawa_sendiri' => $is_bawa_sendiri,
+                                                    'harga_botol' => $indikasi_termasuk_botol ? $selisih : 0,
+                                                    'bibits' => [],
+                                                    'subtotal' => 0
+                                                ];
+                                            }
+
+                                            $current_racikan['bibits'][] = [
+                                                'nama' => $detail->parfum->nama_parfum,
+                                                'ml' => $detail->jumlah_ml,
+                                                'harga' => $harga_bibit_normal,
+                                            ];
+                                            $current_racikan['subtotal'] += $detail->subtotal;
+                                        }
+                                    }
+                                    if ($current_racikan) {
+                                        $grouped_items[] = ['type' => 'racikan', 'data' => $current_racikan];
+                                    }
+                                @endphp
+
+                                <ul class="list-none space-y-2">
+                                    @foreach($grouped_items as $item)
+                                        @if($item['type'] === 'jadi')
+                                            @php $detail = $item['data']; @endphp
                                             <li class="border-b border-zinc-100 dark:border-zinc-700 pb-2 last:border-0 last:pb-0">
                                                 <div class="flex flex-col">
-                                                    <span class="font-semibold text-zinc-800 dark:text-zinc-300">{{ $detail->parfumJadi->nama_parfum }}</span>
-                                                    <div class="flex justify-between items-center mt-1">
-                                                        <span>{{ $detail->jumlah_pcs }} pcs @ Rp {{ number_format($detail->harga_saat_transaksi, 0, ',', '.') }}</span>
+                                                    <span class="font-semibold text-zinc-800 dark:text-zinc-300">[Ready] {{ $detail->parfumJadi->nama_parfum }}</span>
+                                                    <div class="flex justify-between items-center mt-1 text-xs">
+                                                        <span class="text-zinc-600 dark:text-zinc-400">{{ $detail->jumlah_pcs }} pcs @ Rp {{ number_format($detail->harga_saat_transaksi, 0, ',', '.') }}</span>
                                                         <span class="font-bold text-zinc-900 dark:text-zinc-200">Rp {{ number_format($detail->subtotal, 0, ',', '.') }}</span>
                                                     </div>
                                                 </div>
                                             </li>
-                                        @elseif($detail->parfum)
+                                        @elseif($item['type'] === 'racikan')
+                                            @php $racikan = $item['data']; @endphp
                                             <li class="border-b border-zinc-100 dark:border-zinc-700 pb-2 last:border-0 last:pb-0">
                                                 <div class="flex flex-col">
-                                                    <span class="font-semibold text-zinc-800 dark:text-zinc-300">Racikan: {{ $detail->parfum->nama_parfum }}</span>
-                                                    <div class="flex items-center text-xs mt-0.5">
-                                                        <span>{{ $detail->jumlah_ml }} ml</span>
-                                                        <span class="mx-1.5 text-zinc-300 dark:text-zinc-600">|</span>
-                                                        @if($detail->botol)
-                                                            <span>Botol {{ $detail->botol->nama_botol }}</span>
+                                                    <span class="font-semibold text-zinc-800 dark:text-zinc-300">
+                                                        Racikan Custom
+                                                    </span>
+                                                    
+                                                    <div class="flex flex-col text-xs mt-1 space-y-0.5">
+                                                        @foreach($racikan['bibits'] as $bibit)
+                                                            <span class="text-zinc-600 dark:text-zinc-400">
+                                                            {{ $bibit['nama'] }} ({{ $bibit['ml'] }} ml)
+                                                            <span class="text-zinc-500 dark:text-zinc-500">
+                                                                Rp {{ number_format($bibit['harga'], 0, ',', '.') }}
+                                                            </span>
+                                                        </span>
+                                                        @endforeach
+                                                        
+                                                        @if($racikan['is_bawa_sendiri'])
+                                                            <span class="text-zinc-500 italic">Bawa Botol Sendiri</span>
                                                         @else
-                                                            <span class="italic text-zinc-500">Bawa Botol Sendiri</span>
+                                                            <span class="text-blue-600 dark:text-blue-400 font-medium">{{ $racikan['botol']->nama_botol }} <span class="font-bold">(Rp {{ number_format($racikan['harga_botol'], 0, ',', '.') }})</span></span>
                                                         @endif
                                                     </div>
-                                                    <div class="flex justify-between items-center mt-1">
-                                                        <span>@ Rp {{ number_format($detail->harga_saat_transaksi, 0, ',', '.') }}</span>
-                                                        <span class="font-bold text-zinc-900 dark:text-zinc-200">Rp {{ number_format($detail->subtotal, 0, ',', '.') }}</span>
+                                                    
+                                                    <div class="flex justify-between items-center mt-1 pt-1 border-t border-dashed border-zinc-200 dark:border-zinc-700">
+                                                        <span class="text-xs text-zinc-500 font-medium">Subtotal:</span>
+                                                        <span class="font-bold text-zinc-900 dark:text-zinc-200">Rp {{ number_format($racikan['subtotal'], 0, ',', '.') }}</span>
                                                     </div>
                                                 </div>
                                             </li>
@@ -334,9 +431,7 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
 
     </div>
 
-    <!-- MODAL REKAP ITEM (ALPINE.JS) -->
     <div x-show="showItemModal" style="display: none;" class="fixed inset-0 z-[100] overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-        <!-- Latar belakang gelap -->
         <div x-show="showItemModal" x-transition.opacity class="fixed inset-0 bg-gray-900/75 dark:bg-gray-950/80 transition-opacity backdrop-blur-sm" @click="showItemModal = false"></div>
 
         <div class="flex items-center justify-center min-h-screen p-4 text-center sm:p-0">
@@ -367,7 +462,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
 
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-h-[60vh] overflow-y-auto p-1">
                         
-                        <!-- List Parfum Jadi -->
                         <div class="bg-zinc-50 dark:bg-zinc-800/50 p-4 rounded-lg border dark:border-zinc-700/50">
                             <h4 class="font-bold text-blue-600 dark:text-blue-400 border-b dark:border-zinc-700 pb-2 mb-3 flex items-center gap-2">
                                 📦 Parfum Jadi
@@ -384,7 +478,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                             </ul>
                         </div>
 
-                        <!-- List Bibit -->
                         <div class="bg-zinc-50 dark:bg-zinc-800/50 p-4 rounded-lg border dark:border-zinc-700/50">
                             <h4 class="font-bold text-emerald-600 dark:text-emerald-400 border-b dark:border-zinc-700 pb-2 mb-3 flex items-center gap-2">
                                 💧 Bibit (Racikan)
@@ -401,7 +494,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                             </ul>
                         </div>
 
-                        <!-- List Botol -->
                         <div class="bg-zinc-50 dark:bg-zinc-800/50 p-4 rounded-lg border dark:border-zinc-700/50">
                             <h4 class="font-bold text-purple-600 dark:text-purple-400 border-b dark:border-zinc-700 pb-2 mb-3 flex items-center gap-2">
                                 🍾 Botol Terpakai
@@ -421,7 +513,6 @@ new #[Layout('layouts.app')] #[Title('Laporan Penjualan - Surya Parfum')] class 
                     </div>
                 </div>
                 
-                <!-- Footer Modal -->
                 <div class="bg-gray-50 dark:bg-zinc-800/80 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse border-t dark:border-zinc-700">
                     <button type="button" @click="showItemModal = false" class="w-full inline-flex justify-center rounded-lg shadow-sm px-6 py-2 bg-zinc-800 dark:bg-zinc-200 text-base font-semibold text-white dark:text-zinc-900 hover:bg-zinc-700 dark:hover:bg-white focus:outline-none sm:w-auto sm:text-sm transition-colors">
                         Tutup

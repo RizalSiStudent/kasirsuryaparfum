@@ -11,6 +11,9 @@ class Parfum extends Model
     protected $fillable = [
         'id_supplier', // <-- Tambahan baru
         'nama_parfum',
+        'grade', 
+        'gender', 
+        'deskripsi', // <-- Tambahkan ini
         'harga_jual_per_ml',
         'harga_beli_per_ml',
         'stok_ml',

@@ -168,9 +168,9 @@ new #[Layout('layouts.app')] #[Title('Data Botol - Surya Parfum')] class extends
                         <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
                             <td class="px-4 py-3">{{ $botol->nama_botol }}</td>
                             <td class="px-4 py-3 text-center">{{ $botol->kapasitas_ml }} ML</td>
-                            <td class="px-4 py-3">Rp {{ number_format($botol->harga_beli_per_pcs, 2, ',', '.') }}</td>
-                            <td class="px-4 py-3">Rp {{ number_format($botol->harga_jual_per_pcs, 2, ',', '.') }}</td>
-                            <td class="px-4 py-3 text-center">{{ $botol->stok_pcs }}</td>
+                            <td class="px-4 py-3">Rp {{ number_format($botol->harga_beli_per_pcs, 0, ',', '.') }}</td>
+                            <td class="px-4 py-3">Rp {{ number_format($botol->harga_jual_per_pcs, 0, ',', '.') }}</td>
+                            <td class="px-4 py-3 text-center">{{ number_format($botol->stok_pcs, 0, ',', '.') }}</td>
                             <td class="px-4 py-3 text-center">
                                 <button wire:click="edit({{ $botol->id_botol }})" class="text-yellow-600 hover:text-yellow-800 px-2 font-medium">Edit</button>
                                 <button wire:click="delete({{ $botol->id_botol }})" class="text-red-600 hover:text-red-800 px-2 font-medium" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</button>

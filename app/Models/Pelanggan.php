@@ -14,5 +14,6 @@ class Pelanggan extends Model
         'no_telepon',
         'alamat',
         'tanggal_gabung',
+        'poin',
     ];
 }

@@ -153,9 +153,9 @@ new #[Layout('layouts.app')] #[Title('Data Parfum Jadi - Surya Parfum')] class e
                         @foreach($parfum_jadis as $pj)
                         <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
                             <td class="px-4 py-3 font-medium">{{ $pj->nama_parfum }}</td>
-                            <td class="px-4 py-3">Rp {{ number_format($pj->harga_beli_per_pcs, 2, ',', '.') }}</td>
-                            <td class="px-4 py-3 text-green-600 dark:text-green-400 font-semibold">Rp {{ number_format($pj->harga_jual_per_pcs, 2, ',', '.') }}</td>
-                            <td class="px-4 py-3 text-center font-bold">{{ $pj->stok_pcs }}</td>
+                            <td class="px-4 py-3">Rp {{ number_format($pj->harga_beli_per_pcs, 0, ',', '.') }}</td>
+                            <td class="px-4 py-3 text-green-600 dark:text-green-400 font-semibold">Rp {{ number_format($pj->harga_jual_per_pcs, 0, ',', '.') }}</td>
+                            <td class="px-4 py-3 text-center font-bold">{{ number_format($pj->stok_pcs, 0, ',', '.') }}</td>
                             <td class="px-4 py-3 text-center">
                                 <button wire:click="edit({{ $pj->id_parfum_jadi }})" class="text-yellow-600 hover:text-yellow-800 px-2 font-medium">Edit</button>
                                 <button wire:click="delete({{ $pj->id_parfum_jadi }})" class="text-red-600 hover:text-red-800 px-2 font-medium" onclick="return confirm('Yakin ingin menghapus data ini?')">Hapus</button>

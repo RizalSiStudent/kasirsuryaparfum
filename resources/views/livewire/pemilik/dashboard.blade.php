@@ -16,18 +16,29 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
     public $total_transaksi = 0;
     public $total_produk_aktif = 0;
 
-    // Variabel Grafik
-    public $chart_labels = [];
-    public $chart_data = [];
+    // Variabel Grafik Pendapatan Harian
+    public $chart_pendapatan_labels = [];
+    public $chart_pendapatan_data = [];
 
-    public $chart_parfum_labels = [];
-    public $chart_parfum_data = [];
+    // Variabel Grafik Top 5 Semua
+    public $chart_top_all_labels = [];
+    public $chart_top_all_data = [];
+
+    // Variabel Grafik Top 5 Male
+    public $chart_top_male_labels = [];
+    public $chart_top_male_data = [];
+
+    // Variabel Grafik Top 5 Female
+    public $chart_top_female_labels = [];
+    public $chart_top_female_data = [];
 
     public function mount()
     {
         $bulanIni = Carbon::now()->month;
         $tahunIni = Carbon::now()->year;
+        $hariDalamBulan = Carbon::now()->daysInMonth;
 
+        // 1. Ringkasan Metrik
         $penjualanBulanIni = Penjualan::where('status_pembayaran', 'success')
                                 ->whereMonth('created_at', $bulanIni)
                                 ->whereYear('created_at', $tahunIni);
@@ -36,46 +47,59 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
         $this->total_transaksi = (clone $penjualanBulanIni)->count();
         $this->total_produk_aktif = Parfum::count() + ParfumJadi::count();
 
-        // Data Pendapatan Harian
-        $tanggalAwal = Carbon::now()->subDays(6)->startOfDay();
-        $tanggalAkhir = Carbon::now()->endOfDay();
+        // 2. Data Pendapatan Harian (Tanggal 1 s/d Akhir Bulan Ini)
+        $dataPenjualanHarian = Penjualan::select(
+                                DB::raw('DAY(created_at) as hari'),
+                                DB::raw('SUM(total_bayar) as total')
+                            )
+                            ->where('status_pembayaran', 'success')
+                            ->whereMonth('created_at', $bulanIni)
+                            ->whereYear('created_at', $tahunIni)
+                            ->groupBy('hari')
+                            ->orderBy('hari', 'asc')
+                            ->get()
+                            ->keyBy('hari');
 
-        $dataPenjualan = Penjualan::select(
-                            DB::raw('DATE(created_at) as tanggal'),
-                            DB::raw('SUM(total_bayar) as total')
-                        )
-                        ->where('status_pembayaran', 'success')
-                        ->whereBetween('created_at', [$tanggalAwal, $tanggalAkhir])
-                        ->groupBy('tanggal')
-                        ->orderBy('tanggal', 'asc')
-                        ->get()
-                        ->keyBy('tanggal');
-
-        for ($i = 0; $i < 7; $i++) {
-            $tgl_asli = Carbon::now()->subDays(6 - $i)->format('Y-m-d');
-            $tgl_label = Carbon::parse($tgl_asli)->format('d M');
-            
-            $this->chart_labels[] = $tgl_label;
-            $this->chart_data[] = isset($dataPenjualan[$tgl_asli]) ? $dataPenjualan[$tgl_asli]->total : 0;
+        for ($i = 1; $i <= $hariDalamBulan; $i++) {
+            $this->chart_pendapatan_labels[] = (string) $i;
+            $this->chart_pendapatan_data[] = isset($dataPenjualanHarian[$i]) ? $dataPenjualanHarian[$i]->total : 0;
         }
 
-        // Data Top Parfum
-        $topParfums = DB::table('detail_penjualans')
+        // 3. Top 5 Bibit Keseluruhan
+        $topOverall = $this->getTopBibitQuery()->limit(5)->get();
+        foreach ($topOverall as $tp) {
+            $this->chart_top_all_labels[] = Str::limit($tp->nama_parfum, 15);
+            $this->chart_top_all_data[] = (int) $tp->total_ml;
+        }
+
+        // 4. Top 5 Bibit Pria (Male)
+        $topMale = $this->getTopBibitQuery()->where('parfums.gender', 'Male')->limit(5)->get();
+        foreach ($topMale as $tp) {
+            $this->chart_top_male_labels[] = Str::limit($tp->nama_parfum, 15);
+            $this->chart_top_male_data[] = (int) $tp->total_ml;
+        }
+
+        // 5. Top 5 Bibit Wanita (Female)
+        $topFemale = $this->getTopBibitQuery()->where('parfums.gender', 'Female')->limit(5)->get();
+        foreach ($topFemale as $tp) {
+            $this->chart_top_female_labels[] = Str::limit($tp->nama_parfum, 15);
+            $this->chart_top_female_data[] = (int) $tp->total_ml;
+        }
+    }
+
+    // Fungsi Pembantu Agar Query Tidak Ditulis Berulang
+    private function getTopBibitQuery()
+    {
+        return DB::table('detail_penjualans')
             ->join('penjualans', 'detail_penjualans.id_penjualan', '=', 'penjualans.id_penjualan')
             ->join('parfums', 'detail_penjualans.id_parfum', '=', 'parfums.id_parfum')
             ->select('parfums.nama_parfum', DB::raw('SUM(detail_penjualans.jumlah_ml) as total_ml'))
             ->where('penjualans.status_pembayaran', 'success')
             ->whereNotNull('detail_penjualans.id_parfum')
             ->groupBy('parfums.id_parfum', 'parfums.nama_parfum')
-            ->orderByDesc('total_ml')
-            ->limit(5)
-            ->get();
-
-        foreach ($topParfums as $tp) {
-            $this->chart_parfum_labels[] = $tp->nama_parfum;
-            $this->chart_parfum_data[] = (int) $tp->total_ml;
-        }
+            ->orderByDesc('total_ml');
     }
+
 }; ?>
 
 <div>
@@ -118,91 +142,125 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
             </div>
         </div>
 
-        <div x-data="{ focus: null }" class="relative w-full h-[850px] lg:h-[480px] mt-2 rounded-xl bg-transparent">
+        <div x-data="{ zoomBawah: null }" class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-2">
             
-            <div :class="
-                    focus === null 
-                        ? 'top-0 left-0 w-full lg:w-[calc(50%-12px)] h-[calc(50%-12px)] lg:h-full z-10' 
-                        : (focus === 'penjualan' 
-                            ? 'top-0 left-0 w-full lg:w-[calc(72%-12px)] h-[calc(70%-12px)] lg:h-full z-20 shadow-md ring-1 ring-zinc-200 dark:ring-zinc-700' 
-                            : 'top-0 left-0 w-full lg:w-[calc(28%-12px)] h-[calc(30%-12px)] lg:h-full z-10 cursor-pointer opacity-75 hover:opacity-100 border border-green-500/40'
-                        )
-                 "
-                 class="absolute bg-white dark:bg-zinc-800 p-4 sm:p-5 rounded-xl border dark:border-zinc-700 shadow-sm flex flex-col overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] group">
-                
-                <div class="flex justify-between items-center mb-2 sm:mb-4">
-                    <h3 :class="(focus === 'parfum') ? 'text-xs sm:text-sm' : 'text-base sm:text-lg'" class="font-bold dark:text-gray-100 transition-all truncate text-green-600 dark:text-green-500">Grafik Pendapatan</h3>
-                    
-                    <button x-show="focus === null || focus === 'penjualan'" @click.stop="focus = focus === 'penjualan' ? null : 'penjualan'" class="p-1.5 bg-zinc-100 dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-600 rounded-lg transition text-gray-600 dark:text-gray-300">
-                        <svg x-show="focus === null" class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
-                        <svg x-show="focus === 'penjualan'" style="display: none;" class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 14h4v4m0-4l-5 5m15-1h-4v4m0-4l5 5M4 10h4V6m0 4l-5-5m15 1h-4V6m0 4l5-5"></path></svg>
-                    </button>
-                </div>
-                
-                <div class="relative w-full flex-1" wire:ignore>
-                    <canvas id="grafikPenjualan"></canvas>
-                </div>
-
-                <div x-show="focus === 'parfum'" @click="focus = 'penjualan'" style="display: none;" class="absolute inset-0 z-30 flex items-center justify-center bg-zinc-900/5 hover:bg-zinc-900/20 transition-colors rounded-xl">
-                    <span class="bg-black/80 text-white text-[10px] sm:text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">Perbesar Grafik 📈</span>
+            <div class="bg-white dark:bg-zinc-800 p-5 rounded-xl border dark:border-zinc-700 shadow-sm flex flex-col lg:col-span-3 h-[350px]">
+                <h3 class="text-lg font-bold dark:text-gray-100 text-green-600 dark:text-green-500 mb-2">
+                    Pendapatan Harian (Bulan {{ now()->translatedFormat('F Y') }})
+                </h3>
+                <div class="relative w-full flex-1 min-h-0" wire:ignore>
+                    <canvas id="grafikPendapatan"></canvas>
                 </div>
             </div>
 
-            <div :class="
-                    focus === null 
-                        ? 'top-[calc(50%+12px)] lg:top-0 left-0 lg:left-[calc(50%+12px)] w-full lg:w-[calc(50%-12px)] h-[calc(50%-12px)] lg:h-full z-10' 
-                        : (focus === 'penjualan' 
-                            ? 'top-[calc(70%+12px)] lg:top-0 left-0 lg:left-[calc(72%+12px)] w-full lg:w-[calc(28%-12px)] h-[calc(30%-12px)] lg:h-full z-10 cursor-pointer opacity-75 hover:opacity-100 border border-orange-500/40' 
-                            : 'top-[calc(30%+12px)] lg:top-0 left-0 lg:left-[calc(28%+12px)] w-full lg:w-[calc(72%-12px)] h-[calc(70%-12px)] lg:h-full z-20 shadow-md ring-1 ring-zinc-200 dark:ring-zinc-700'
-                        )
-                 "
-                 class="absolute bg-white dark:bg-zinc-800 p-4 sm:p-5 rounded-xl border dark:border-zinc-700 shadow-sm flex flex-col overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)] group">
-                
-                <div class="flex justify-between items-center mb-2 sm:mb-4">
-                    <h3 :class="(focus === 'penjualan') ? 'text-xs sm:text-sm' : 'text-base sm:text-lg'" class="font-bold dark:text-gray-100 transition-all truncate text-orange-600 dark:text-orange-500">Top 5 Bibit Terlaris</h3>
-                    
-                    <button x-show="focus === null || focus === 'parfum'" @click.stop="focus = focus === 'parfum' ? null : 'parfum'" class="p-1.5 bg-zinc-100 dark:bg-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-600 rounded-lg transition text-gray-600 dark:text-gray-300">
-                        <svg x-show="focus === null" class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
-                        <svg x-show="focus === 'parfum'" style="display: none;" class="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 14h4v4m0-4l-5 5m15-1h-4v4m0-4l5 5M4 10h4V6m0 4l-5-5m15 1h-4V6m0 4l5-5"></path></svg>
+            <div x-show="zoomBawah === null || zoomBawah === 'all'" 
+                 :class="zoomBawah === 'all' ? 'lg:col-span-3 h-[450px]' : 'h-[300px]'"
+                 class="bg-white dark:bg-zinc-800 p-5 rounded-xl border dark:border-zinc-700 shadow-sm flex flex-col transition-all duration-300 overflow-hidden">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-bold dark:text-gray-100 text-orange-600 dark:text-orange-500 truncate" :class="zoomBawah === 'all' ? 'text-lg' : 'text-sm'">
+                        🔥 Top 5 Semua Bibit
+                    </h3>
+                    <button @click="zoomBawah = zoomBawah === 'all' ? null : 'all'; setTimeout(() => window.dispatchEvent(new Event('resize')), 310)" class="p-1.5 bg-orange-50 dark:bg-orange-900/30 hover:bg-orange-100 dark:hover:bg-orange-900/50 text-orange-600 rounded-lg transition-colors" title="Perbesar/Perkecil Grafik">
+                        <svg x-show="zoomBawah !== 'all'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                        <svg x-show="zoomBawah === 'all'" style="display: none;" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 14h4v4m0-4l-5 5m15-1h-4v4m0-4l5 5M4 10h4V6m0 4l-5-5m15 1h-4V6m0 4l5-5"></path></svg>
                     </button>
                 </div>
-                
-                <div class="relative w-full flex-1" wire:ignore>
-                    <canvas id="grafikParfum"></canvas>
+                <div class="relative w-full flex-1 min-h-0" wire:ignore>
+                    <canvas id="grafikTopAll"></canvas>
                 </div>
+            </div>
 
-                <div x-show="focus === 'penjualan'" @click="focus = 'parfum'" style="display: none;" class="absolute inset-0 z-30 flex items-center justify-center bg-zinc-900/5 hover:bg-zinc-900/20 transition-colors rounded-xl">
-                    <span class="bg-black/80 text-white text-[10px] sm:text-xs px-3 py-1.5 rounded-full font-semibold shadow-lg backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">Perbesar Grafik 📈</span>
+            <div x-show="zoomBawah === null || zoomBawah === 'male'" 
+                 :class="zoomBawah === 'male' ? 'lg:col-span-3 h-[450px]' : 'h-[300px]'"
+                 class="bg-white dark:bg-zinc-800 p-5 rounded-xl border dark:border-zinc-700 shadow-sm flex flex-col transition-all duration-300 overflow-hidden">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-bold dark:text-gray-100 text-blue-600 dark:text-blue-500 truncate" :class="zoomBawah === 'male' ? 'text-lg' : 'text-sm'">
+                        👨 Top 5 Male
+                    </h3>
+                    <button @click="zoomBawah = zoomBawah === 'male' ? null : 'male'; setTimeout(() => window.dispatchEvent(new Event('resize')), 310)" class="p-1.5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-600 rounded-lg transition-colors" title="Perbesar/Perkecil Grafik">
+                        <svg x-show="zoomBawah !== 'male'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                        <svg x-show="zoomBawah === 'male'" style="display: none;" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 14h4v4m0-4l-5 5m15-1h-4v4m0-4l5 5M4 10h4V6m0 4l-5-5m15 1h-4V6m0 4l5-5"></path></svg>
+                    </button>
+                </div>
+                <div class="relative w-full flex-1 min-h-0" wire:ignore>
+                    <canvas id="grafikTopMale"></canvas>
+                </div>
+            </div>
+
+            <div x-show="zoomBawah === null || zoomBawah === 'female'" 
+                 :class="zoomBawah === 'female' ? 'lg:col-span-3 h-[450px]' : 'h-[300px]'"
+                 class="bg-white dark:bg-zinc-800 p-5 rounded-xl border dark:border-zinc-700 shadow-sm flex flex-col transition-all duration-300 overflow-hidden">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-bold dark:text-gray-100 text-pink-600 dark:text-pink-500 truncate" :class="zoomBawah === 'female' ? 'text-lg' : 'text-sm'">
+                        👩 Top 5 Female
+                    </h3>
+                    <button @click="zoomBawah = zoomBawah === 'female' ? null : 'female'; setTimeout(() => window.dispatchEvent(new Event('resize')), 310)" class="p-1.5 bg-pink-50 dark:bg-pink-900/30 hover:bg-pink-100 dark:hover:bg-pink-900/50 text-pink-600 rounded-lg transition-colors" title="Perbesar/Perkecil Grafik">
+                        <svg x-show="zoomBawah !== 'female'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                        <svg x-show="zoomBawah === 'female'" style="display: none;" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 14h4v4m0-4l-5 5m15-1h-4v4m0-4l5 5M4 10h4V6m0 4l-5-5m15 1h-4V6m0 4l5-5"></path></svg>
+                    </button>
+                </div>
+                <div class="relative w-full flex-1 min-h-0" wire:ignore>
+                    <canvas id="grafikTopFemale"></canvas>
                 </div>
             </div>
 
         </div>
+
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         function renderSemuaGrafik() {
-            const canvasPenjualan = document.getElementById('grafikPenjualan');
-            if (canvasPenjualan) {
-                const ctxPenjualan = canvasPenjualan.getContext('2d');
-                if (window.mySuryaChart) window.mySuryaChart.destroy();
-                
-                window.mySuryaChart = new Chart(ctxPenjualan, {
+            
+            // Konfigurasi Standar untuk Chart Batang
+           // Konfigurasi Standar untuk Chart Batang
+            const barOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) { return ' Terjual: ' + context.parsed.y.toLocaleString('id-ID') + ' ML'; }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(156, 163, 175, 0.1)' },
+                        // Menampilkan kembali angka sumbu Y beserta keterangan "ML"
+                        ticks: { 
+                            display: true,
+                            font: { size: 10 },
+                            callback: function(value) { return value + ' ML'; }
+                        },
+                    },
+                    x: { 
+                        grid: { display: false },
+                        ticks: { font: { size: 10 } }
+                    }
+                }
+            };
+
+            // 1. Grafik Pendapatan Harian
+            const ctxPendapatan = document.getElementById('grafikPendapatan')?.getContext('2d');
+            if (ctxPendapatan) {
+                if (window.chartPendapatan) window.chartPendapatan.destroy();
+                window.chartPendapatan = new Chart(ctxPendapatan, {
                     type: 'line',
                     data: {
-                        labels: @json($chart_labels),
+                        labels: @json($chart_pendapatan_labels),
                         datasets: [{
                             label: 'Pendapatan (Rp)',
-                            data: @json($chart_data),
+                            data: @json($chart_pendapatan_data),
                             borderColor: '#10B981',
                             backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                            borderWidth: 3,
+                            borderWidth: 2,
                             fill: true,
-                            tension: 0.4,
-                            pointBackgroundColor: '#fff',
-                            pointBorderColor: '#10B981',
-                            pointRadius: 4,
-                            pointHoverRadius: 6
+                            tension: 0.3,
+                            pointRadius: 2,
+                            pointHoverRadius: 5
                         }]
                     },
                     options: {
@@ -212,7 +270,8 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
                             legend: { display: false },
                             tooltip: {
                                 callbacks: {
-                                    label: function(context) { return ' Rp ' + context.parsed.y.toLocaleString('id-ID'); }
+                                    label: function(context) { return ' Rp ' + context.parsed.y.toLocaleString('id-ID'); },
+                                    title: function(context) { return 'Tgl ' + context[0].label; }
                                 }
                             }
                         },
@@ -228,45 +287,66 @@ new #[Layout('layouts.app')] #[Title('Dashboard - Surya Parfum')] class extends 
                 });
             }
 
-            const canvasParfum = document.getElementById('grafikParfum');
-            if (canvasParfum) {
-                const ctxParfum = canvasParfum.getContext('2d');
-                if (window.myParfumChart) window.myParfumChart.destroy();
-                
-                window.myParfumChart = new Chart(ctxParfum, {
+            // 2. Grafik Top All
+            const ctxTopAll = document.getElementById('grafikTopAll')?.getContext('2d');
+            if (ctxTopAll) {
+                if (window.chartTopAll) window.chartTopAll.destroy();
+                window.chartTopAll = new Chart(ctxTopAll, {
                     type: 'bar',
                     data: {
-                        labels: @json($chart_parfum_labels),
+                        labels: @json($chart_top_all_labels),
                         datasets: [{
-                            label: 'Terjual (ML)',
-                            data: @json($chart_parfum_data),
+                            data: @json($chart_top_all_data),
                             backgroundColor: 'rgba(249, 115, 22, 0.85)',
                             borderColor: '#EA580C',
                             borderWidth: 1,
-                            borderRadius: 6,
+                            borderRadius: 4,
                             barPercentage: 0.6
                         }]
                     },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                callbacks: {
-                                    label: function(context) { return ' Terjual: ' + context.parsed.y.toLocaleString('id-ID') + ' ML'; }
-                                }
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                grid: { color: 'rgba(156, 163, 175, 0.1)' },
-                                ticks: { callback: function(value) { return value + ' ML'; } }
-                            },
-                            x: { grid: { display: false } }
-                        }
-                    }
+                    options: barOptions
+                });
+            }
+
+            // 3. Grafik Top Male
+            const ctxTopMale = document.getElementById('grafikTopMale')?.getContext('2d');
+            if (ctxTopMale) {
+                if (window.chartTopMale) window.chartTopMale.destroy();
+                window.chartTopMale = new Chart(ctxTopMale, {
+                    type: 'bar',
+                    data: {
+                        labels: @json($chart_top_male_labels),
+                        datasets: [{
+                            data: @json($chart_top_male_data),
+                            backgroundColor: 'rgba(59, 130, 246, 0.85)', // Biru
+                            borderColor: '#2563EB',
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            barPercentage: 0.6
+                        }]
+                    },
+                    options: barOptions
+                });
+            }
+
+            // 4. Grafik Top Female
+            const ctxTopFemale = document.getElementById('grafikTopFemale')?.getContext('2d');
+            if (ctxTopFemale) {
+                if (window.chartTopFemale) window.chartTopFemale.destroy();
+                window.chartTopFemale = new Chart(ctxTopFemale, {
+                    type: 'bar',
+                    data: {
+                        labels: @json($chart_top_female_labels),
+                        datasets: [{
+                            data: @json($chart_top_female_data),
+                            backgroundColor: 'rgba(236, 72, 153, 0.85)', // Pink
+                            borderColor: '#DB2777',
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            barPercentage: 0.6
+                        }]
+                    },
+                    options: barOptions
                 });
             }
         }
